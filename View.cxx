@@ -12,6 +12,6 @@ std::string_view View::realize() const
 #ifdef CWDEBUG
 void View::print_on(std::ostream& os) const
 {
-  return os << realize();
+  os << realize();
 }
 #endif

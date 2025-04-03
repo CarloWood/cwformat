@@ -11,18 +11,20 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 #==============================================================================
-# Get libcwd
+# Debugging support
 
 # Begin of gitache configuration.
 set(GITACHE_PACKAGES libcwd_r)
 include(cwm4/cmake/StableGitache)
 # End of gitache configuration.
 
+include(cwm4/cmake/AICxxProject)
+include(AICxxSubmodules)
+
 #==============================================================================
 # cwformat
 
 find_package(LLVM REQUIRED CONFIG)
-find_package(Boost CONFIG COMPONENTS filesystem)
 
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
@@ -39,6 +41,5 @@ llvm_map_components_to_libnames(llvm_libs support)
 target_link_libraries(cwformat
   PRIVATE
     ${llvm_libs}
-  PUBLIC
-    Boost::filesystem
+    ${AICXX_OBJECTS_LIST}
 )

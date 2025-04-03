@@ -314,7 +314,7 @@ void process_filename(std::filesystem::path const& filename, bool use_cin)
 void process_input_file(std::string const& input_filename, std::istream& input, std::ostream& output)
 {
   SourceFile source_file(input_filename, input);
-  TranslationUnit TU{source_file};
+  TranslationUnit TU{source_file COMMA_CWDEBUG_ONLY("TU:" + input_filename)};
 
   std::cout << "Writing \"" << source_file.filename() << "\":\n";
   TU.print(output);
