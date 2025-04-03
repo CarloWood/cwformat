@@ -3,7 +3,7 @@
 #include <string_view>
 #include <memory>
 #include <variant>
-#ifdef DEBUG
+#ifdef CWDEBUG
 #include <iosfwd>
 #endif
 
@@ -29,7 +29,7 @@ class View
 
   std::string_view realize() const;
 
-#ifdef DEBUG
-  friend std::ostream& operator<<(std::ostream& os, View const& view);
+#ifdef CWDEBUG
+  void print_on(std::ostream& os) const;
 #endif
 };

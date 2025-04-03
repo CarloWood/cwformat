@@ -1,4 +1,6 @@
+#include "sys.h"
 #include "SourceFile.h"
+#include "TranslationUnit.h"
 
 #include <cerrno>
 #include <filesystem>
@@ -312,6 +314,8 @@ void process_filename(std::filesystem::path const& filename, bool use_cin)
 void process_input_file(std::string const& input_filename, std::istream& input, std::ostream& output)
 {
   SourceFile source_file(input_filename, input);
+  TranslationUnit TU{source_file};
+
   std::cout << "Writing \"" << source_file.filename() << "\":\n";
-  output << source_file.range(source_file.begin(), source_file.end());
+  TU.print(output);
 }

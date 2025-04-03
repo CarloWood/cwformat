@@ -11,6 +11,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 #==============================================================================
+# Get libcwd
+
+# Begin of gitache configuration.
+set(GITACHE_PACKAGES libcwd_r)
+include(cwm4/cmake/StableGitache)
+# End of gitache configuration.
+
+#==============================================================================
 # cwformat
 
 find_package(LLVM REQUIRED CONFIG)
@@ -19,10 +27,10 @@ find_package(Boost CONFIG COMPONENTS filesystem)
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
-add_executable(cwformat cwformat.cxx View.cxx SourceFile.cxx)
+add_executable(cwformat cwformat.cxx View.cxx SourceFile.cxx TranslationUnit.cxx)
 
 # Include LLVM directories.
-target_compile_definitions(cwformat PRIVATE DEBUG ${LLVM_DEFINITIONS})
+target_compile_definitions(cwformat PRIVATE CWDEBUG ${LLVM_DEFINITIONS})
 target_include_directories(cwformat PRIVATE ${LLVM_INCLUDE_DIRS})
 
 # Find the libraries that correspond to the LLVM components that we wish to use.

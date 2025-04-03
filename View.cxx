@@ -1,16 +1,17 @@
+#include "sys.h"
 #include "View.h"
-#include <cassert>
+#include "debug.h"
 
 std::string_view View::realize() const
 {
   // allocated is not implemented yet.
-  assert(type_ == external);
+  ASSERT(type_ == external);
   return {std::get<char const*>(data_), size_};
 }
 
-#ifdef DEBUG
-std::ostream& operator<<(std::ostream& os, View const& view)
+#ifdef CWDEBUG
+void View::print_on(std::ostream& os) const
 {
-  return os << view.realize();
+  return os << realize();
 }
 #endif
