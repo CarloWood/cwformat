@@ -3,26 +3,19 @@
 #include <iterator>
 #include <sstream>
 
-void SourceFile::init(std::istream& input)
-{
-  std::ostringstream ss;
-  ss << input.rdbuf();
-  content_ = std::move(ss).str();
-}
-
 SourceFile::iterator SourceFile::begin() const
 {
-  return content_.begin();
+  return content_->getBufferStart();
 }
 
 SourceFile::iterator SourceFile::end() const
 {
-  return content_.end();
+  return content_->getBufferEnd();
 }
 
 char SourceFile::peek(SourceFile::iterator pos) const
 {
-  return *(pos + 1);
+  return pos[1];
 }
 
 View SourceFile::range(SourceFile::iterator first, SourceFile::iterator last) const

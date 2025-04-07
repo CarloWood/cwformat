@@ -1,11 +1,15 @@
 #include "sys.h"
+
 #include "SourceFile.h"
 #include "TranslationUnit.h"
+#include "Parser.h"
 
 #include <cerrno>
 #include <filesystem>
 #include <iostream>
+#include <chrono>
 #include <random>
+#include <system_error>
 
 //=============================================================================
 // Command Line Options.
@@ -15,36 +19,32 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/Support/raw_ostream.h"
 #include <fstream>
+#include <memory>
 #include <string>
 #include <vector>
 
 namespace cl = llvm::cl;
 
-static char const* program_name = "cwformat";
+// For error messages and --version output. Set to filename component of argv[0].
+static std::string program_name;
 
 // Create a custom category for our options.
 cl::OptionCategory cwformat_category("cwformat options");
 
 // Collect input files as positional arguments.
-cl::list<std::string> input_files(cl::Positional,
-    cl::desc("<file> [<file> ...]"),
-    cl::cat(cwformat_category));
+cl::list<std::string> input_files(cl::Positional, cl::desc("<file> [<file> ...]"), cl::cat(cwformat_category));
 
 // Add clang-format specific options
-cl::opt<std::string> assume_filename("assume-filename",
-    cl::desc("Set filename used to determine the language and to find .clang-format file"),
-    cl::value_desc("string"),
-    cl::cat(cwformat_category));
+cl::opt<std::string> assume_filename("assume-filename", cl::desc("Set filename used to determine the language and to find .clang-format file"),
+  cl::value_desc("string"), cl::cat(cwformat_category));
 
-cl::opt<std::string> files_list_file("files",
-    cl::desc("A file containing a list of files to process, one per line"),
-    cl::value_desc("filename"),
-    cl::cat(cwformat_category));
+cl::opt<std::string> files_list_file(
+  "files", cl::desc("A file containing a list of files to process, one per line"), cl::value_desc("filename"), cl::cat(cwformat_category));
 
-cl::opt<bool> in_place("i",
-    cl::desc("Inplace edit <file>s, if specified"),
-    cl::cat(cwformat_category));
+cl::opt<bool> in_place("i", cl::desc("Inplace edit <file>s, if specified"), cl::cat(cwformat_category));
 
 // Override the default --version behavior.
 static void print_version(llvm::raw_ostream& ros)
@@ -52,27 +52,43 @@ static void print_version(llvm::raw_ostream& ros)
   ros << program_name << " version 0.1.0, written in 2025 by Carlo Wood.\n";
 }
 
-// Helper function to read files from a list file
-llvm::Expected<std::vector<std::string>> read_files_from_list(std::string const& filename)
+// Helper function to read files from a list file.
+llvm::Expected<std::vector<std::filesystem::path>> read_files_from_list(std::filesystem::path const& filename)
 {
-  auto file_buffer = llvm::MemoryBuffer::getFile(filename);
-  if (!file_buffer)
-    return llvm::createStringError(llvm::inconvertibleErrorCode(), "Could not open file list: " + filename);
+  auto file_buffer_or_err = llvm::MemoryBuffer::getFile(filename.native());
+  if (!file_buffer_or_err)
+    return llvm::createStringError(file_buffer_or_err.getError(), "Could not open file list: " + filename.native());
 
-  std::vector<std::string> files;
-  llvm::StringRef content = file_buffer.get()->getBuffer();
+  std::vector<std::filesystem::path> files;
+  llvm::StringRef content = file_buffer_or_err.get()->getBuffer();
 
   while (!content.empty())
   {
-    auto line = content.split('\n').first.trim();
+    llvm::StringRef line;
+    std::tie(line, content) = content.split('\n');
+    line = line.trim();
+
     if (!line.empty())
-      files.push_back(line.str());
-    content = content.substr(content.find_first_of('\n') + 1);
-    if (content.empty() || content.size() == 0)
+      files.emplace_back(line.str());
+
+    if (content.empty())
       break;
   }
 
   return files;
+}
+
+#ifdef _WIN32
+#define WINDOWS_ONLY(x) x
+#else
+#define WINDOWS_ONLY(x)
+#endif
+
+static std::string get_program_name(char const* argv0)
+{
+  std::string program_name{argv0};
+  char const* slash = "/" WINDOWS_ONLY("\\");
+  return program_name.substr(program_name.find_last_of(slash) + 1);
 }
 
 //=============================================================================
@@ -80,6 +96,7 @@ llvm::Expected<std::vector<std::string>> read_files_from_list(std::string const&
 
 class RandomNumber
 {
+ private:
   std::mt19937_64 mersenne_twister_;
 
  public:
@@ -88,40 +105,27 @@ class RandomNumber
   RandomNumber()
   {
     std::random_device rd;
-    result_type seed_value = rd() ^ (
-            (result_type)
-            std::chrono::duration_cast<std::chrono::seconds>(
-                std::chrono::system_clock::now().time_since_epoch()
-                ).count() +
-            (result_type)
-            std::chrono::duration_cast<std::chrono::microseconds>(
-                std::chrono::high_resolution_clock::now().time_since_epoch()
-                ).count() );
+    result_type seed_value = rd() ^
+      ((result_type)std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count() +
+        (result_type)std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now().time_since_epoch())
+          .count());
     mersenne_twister_.seed(seed_value);
   }
 
   int generate(std::uniform_int_distribution<int>& distribution) { return distribution(mersenne_twister_); }
 };
 
-// Return an integer in the range [min, max].
-int randrange(int min, int max)
-{
-  static RandomNumber rn;
-  static std::uniform_int_distribution<int> dist{min, max};
-  return rn.generate(dist);
-}
-
 // Get the path to a unique, non-existing file with the prefix `prefix`.
-std::filesystem::path get_temp_filename(std::filesystem::path const& prefix)
+std::filesystem::path get_temp_filename(RandomNumber& rn, std::filesystem::path const& prefix)
 {
   std::filesystem::path temp_filename;
+  std::uniform_int_distribution<int> dist{0, 0xffff};
   do
   {
     temp_filename = prefix;
     for (int n = 0; n < 4; ++n)
-      temp_filename += std::format("-{:04x}", randrange(0, 0xffff));
-  }
-  while (std::filesystem::exists(temp_filename));
+      temp_filename += std::format("-{:04x}", rn.generate(dist));
+  } while (std::filesystem::exists(temp_filename));
 
   return temp_filename;
 }
@@ -130,11 +134,14 @@ std::filesystem::path get_temp_filename(std::filesystem::path const& prefix)
 // Main function; process commandline parameters.
 
 // Forward declaration.
-void process_filename(std::filesystem::path const& filename, bool use_cin);
+void process_filename(Parser& parser, RandomNumber& rn, std::filesystem::path const& filename, bool use_cin);
 
 int main(int argc, char* argv[])
 {
   // Set the program name.
+  program_name = get_program_name(argv[0]);
+
+  // Function to call upon --version.
   cl::SetVersionPrinter(&print_version);
 
   // Hide all options except those in our category.
@@ -148,174 +155,230 @@ int main(int argc, char* argv[])
 
   if (!files_list_file.empty())
   {
-    auto maybe_files = read_files_from_list(files_list_file);
+    auto maybe_files = read_files_from_list(files_list_file.getValue());
     if (!maybe_files)
     {
-      llvm::errs() << "Error reading files list: " << llvm::toString(maybe_files.takeError()) << "\n";
+      llvm::errs() << program_name << ": Error reading files list '" << files_list_file.getValue()
+                   << "': " << llvm::toString(maybe_files.takeError()) << "\n";
       return 1;
     }
 
-    auto files = maybe_files.get();
+    auto const& files = maybe_files.get();
     files_to_process.insert(files_to_process.end(), files.begin(), files.end());
   }
 
   // Add files specified directly on the command line.
-  int process_cin = input_files.empty() && files_to_process.empty();
-  int position = files_to_process.size();
+  bool process_cin_requested = false;
+  std::vector<std::pair<std::filesystem::path, bool>> work_items; // path, is_stdin
+
   for (std::string const& input_file : input_files)
   {
-    ++position;
     if (input_file == "-")
     {
-      // Process the files in the order they are specified, including stdin.
-      process_cin = position;
-      continue;
+      work_items.push_back({{}, true}); // Empty path signifies stdin
+      process_cin_requested = true;
     }
-    files_to_process.emplace_back(input_file);
+    else
+    {
+      work_items.push_back({std::filesystem::path(input_file), false});
+    }
+  }
+
+  // If no positional args and no --files args, default to stdin
+  if (files_to_process.empty() && work_items.empty())
+  {
+    work_items.push_back({{}, true});
+    process_cin_requested = true;
+  }
+
+  // Combine --files list and positional arguments into a single processing list
+  // Insert items from --files at the beginning
+  for (const auto& path_from_list : files_to_process)
+  {
+    work_items.insert(work_items.begin(), {path_from_list, false});
+  }
+
+  // Output information about the options (optional debug info).
+  if (!assume_filename.empty())
+    llvm::outs() << "Using assumed filename: " << assume_filename << "\n";
+
+  if (in_place && process_cin_requested)
+    llvm::errs() << program_name << ": warning: -i ignored when reading from stdin.\n";
+  else if (in_place)
+    llvm::outs() << "Files will be edited in-place\n";
+
+  // Create a Parser instance.
+  Parser parser;
+  // Needed for temporary file name generation.
+  RandomNumber rn;
+
+  // Process the combined list.
+  int return_code = 0; // Track if any file processing failed
+  for (const auto& item : work_items)
+  {
+    try
+    {
+      process_filename(parser, rn, item.first, item.second);
+    }
+    catch (std::exception& e)
+    {
+      llvm::errs() << program_name << ": Error processing '" << (item.second ? "<stdin>" : item.first.native()) << "': " << e.what() << "\n";
+      return_code = 1; // Mark failure
+    }
+    catch (...)
+    {
+      llvm::errs() << program_name << ": Unknown error processing '" << (item.second ? "<stdin>" : item.first.native()) << "'\n";
+      return_code = 1; // Mark failure
+    }
   }
 
   // Output information about the options.
-  position = 0;
-  for (std::filesystem::path const& filename : files_to_process)
-  {
-    ++position;
-    if (position == process_cin)
-    {
-      process_filename({}, true);
-      process_cin = false;
-    }
-    process_filename(filename, false);
-  }
-  if (process_cin)
-    process_filename({}, true);
-
   if (!assume_filename.empty())
     llvm::outs() << "Using assumed filename: " << assume_filename << "\n";
 
   if (in_place)
     llvm::outs() << "Files will be edited in-place\n";
+
+  return return_code; // Return 0 on success, 1 on any failure
 }
 
 //=============================================================================
 // Process one TU.
 
-// Forward declaration.
-void process_input_file(std::string const& input_filename, std::istream& input, std::ostream& output);
-
-// Open the file `path` or std::cin for input, and open a temporary file based
-// on `path` or open std::cout for output.
+// Acquire the input as an llvm::MemoryBuffer (from file or stdin) and open
+// the appropriate output stream (stdout or temporary file).
 //
 // If a file was opened (use_cin is false) and `in_place` is false, move
 // the temporary file over the original (path) upon successful conversion.
 //
-// Calls process_input_file for the actual processing.
-void process_filename(std::filesystem::path const& filename, bool use_cin)
+// Calls process_input_buffer for the actual processing.
+void process_filename(Parser& parser, RandomNumber& rn, std::filesystem::path const& filename, bool use_cin)
 {
-  // Write to std::cout by default.
-  std::ostream* output_stream = &std::cout;
-  std::ofstream ofile;
-  std::filesystem::path temp_filename;
-  if (!use_cin && in_place)     // Are we writing to disk?
+  // --- 1. Acquire Input Buffer ---
+  std::unique_ptr<llvm::MemoryBuffer> input_buffer;
+  std::string input_filename_str = use_cin ? "<stdin>" : filename.native();
+  std::string stdin_content_holder; // Must outlive input_buffer if getMemBuffer is used
+
+  if (use_cin)
+  {
+    // Read all of stdin into a string first.
+    stdin_content_holder.assign((std::istreambuf_iterator<char>(std::cin)), (std::istreambuf_iterator<char>()));
+
+    if (std::cin.bad())
+    {
+      throw std::runtime_error("Failed reading from stdin");
+    }
+
+    // Create a MemoryBuffer *referencing* the string's data. No copy.
+    // 'stdin_content_holder' MUST outlive the use of 'input_buffer'.
+    input_buffer = llvm::MemoryBuffer::getMemBuffer(llvm::StringRef(stdin_content_holder), input_filename_str, /*RequiresNullTerminator=*/true);
+
+    if (!input_buffer)
+    {
+      throw std::runtime_error("Could not create MemoryBuffer for stdin content");
+      // (This is unlikely unless maybe out of memory for the buffer object itself)
+    }
+  }
+  else
+  {
+    // Use MemoryBuffer::getFile to memory-map or read the file.
+    auto buffer_or_err = llvm::MemoryBuffer::getFile(filename.native(), -1, /*RequiresNullTerminator=*/true);
+    if (!buffer_or_err)
+    {
+      // Propagate LLVM error as a runtime_error exception
+      throw std::runtime_error("Failed to open '" + filename.native() + "': " + buffer_or_err.getError().message());
+    }
+    // Move the buffer out of the Expected object
+    input_buffer = std::move(*buffer_or_err);
+  }
+
+  // --- 2. Setup Output Stream ---
+  std::ostream* output_stream_ptr = &std::cout; // Default to stdout
+  std::ofstream temp_ofile;                     // Store ofstream here if used
+  std::filesystem::path temp_filename;          // Store temp filename path here if used
+  bool writing_to_temp_file = !use_cin && in_place;
+
+  if (writing_to_temp_file)
   {
     std::filesystem::path temp_filename_prefix = filename;
-    temp_filename_prefix += ".temp-stream-";
-    temp_filename = get_temp_filename(temp_filename_prefix);
-    try
+    temp_filename_prefix += ".cwformat-tmp"; // Use a slightly different temp prefix
+    temp_filename = get_temp_filename(rn, temp_filename_prefix);
+
+    // Note: ofstream constructor throws on failure if exceptions(badbit | failbit) is set.
+    // Default is goodbit, so check is_open() after construction.
+    temp_ofile.open(temp_filename, std::ios::binary | std::ios::trunc);
+    if (!temp_ofile.is_open())
     {
-      ofile.exceptions(std::ofstream::failbit);
-      ofile.open(temp_filename, std::ios::binary);
+      // Get error details if possible (less reliable without exceptions enabled)
+      std::error_code ec(errno, std::system_category());
+      throw std::runtime_error("Failed to create temporary file '" + temp_filename.native() + "': " + ec.message());
     }
-    catch (std::system_error const& error)
-    {
-      int err = errno;
-      llvm::errs() << program_name << ": Failed to create \"" << temp_filename << "\": ";
-      if (err == ENOENT)
-        llvm::errs() << "No such directory\n";
-      else
-        llvm::errs() << std::strerror(err) << '\n';
-      return;
-    }
-    // Change output_stream to the opened temporary file.
-    output_stream = &ofile;
+    output_stream_ptr = &temp_ofile; // Point to the file stream
   }
 
-  // Read from std::cin by default;
-  std::istream* input_stream = &std::cin;
-  std::ifstream ifile;
-  if (!use_cin)                 // Are we reading from disk?
-  {
-    try
-    {
-      ifile.exceptions(std::ofstream::failbit);
-      ifile.open(filename, std::ios::binary);
-    }
-    catch (std::system_error const& error)
-    {
-      int err = errno;
-      llvm::errs() << program_name << ": Failed to open \"" << filename << "\": " << std::strerror(err) << '\n';
-      if (ofile.is_open())
-      {
-        ofile.close();
-        std::filesystem::remove(temp_filename);
-      }
-      return;
-    }
-    // Change input_stream to the opened input file.
-    input_stream = &ifile;
-  }
+  // --- 3. Process the Buffer ---
+  // output_stream_ptr is either &std::cout or &temp_ofile
+  // input_buffer holds the data (ownership will be passed)
+  // Use a try-finally like structure for cleanup (RAII with ofstream helps)
 
+  bool success = false;
   try
   {
-    process_input_file(use_cin ? "<stdin>" : filename.native(), *input_stream, *output_stream);
-    output_stream->flush();
-    if (ofile.is_open())
+    parser.process_input_buffer(input_filename_str, std::move(input_buffer), *output_stream_ptr);
+
+    // Flush the output stream to ensure data is written and check for errors
+    output_stream_ptr->flush();
+    if (!output_stream_ptr->good())
     {
-      ofile.close();
-      std::filesystem::rename(temp_filename, filename);
+      throw std::runtime_error("Failed writing to output stream for " + input_filename_str);
     }
-    // Success.
-    return;
-  }
-  catch (std::filesystem::filesystem_error const& error)
-  {
-    std::error_code ec = error.code();
-    std::cerr << "Filesystem error " << ec.value() << ": " << ec.message() << std::endl;
-    std::cerr << "Path1: " << error.path1() << std::endl;
-    if (!error.path2().empty())
-      std::cerr << "Path2: " << error.path2() << std::endl;
-  }
-  catch (std::bad_alloc const& error)
-  {
-    std::cerr << "Memory allocation failed: " << error.what() << std::endl;
-  }
-  catch (std::runtime_error const& error)
-  {
-    std::cerr << "Runtime error: " << error.what() << std::endl;
-  }
-  catch (std::exception const& error)
-  {
-    std::cerr << "Other standard exception: " << error.what() << std::endl;
+
+    // If we wrote to a temporary file, close it before renaming
+    if (temp_ofile.is_open())
+    {
+      temp_ofile.close();
+      // Check state *after* closing
+      if (!temp_ofile.good())
+      {
+        throw std::runtime_error("Failed writing or closing temporary file '" + temp_filename.native() + "'");
+      }
+    }
+    success = true; // Mark success only if all steps complete without exceptions
   }
   catch (...)
   {
-    std::cerr << "Unknown exception caught" << std::endl;
+    // Cleanup on error: If we created a temp file, remove it.
+    if (temp_ofile.is_open())
+    {
+      temp_ofile.close(); // Close first (might fail, ignore failure here)
+    }
+    if (writing_to_temp_file && !temp_filename.empty() && std::filesystem::exists(temp_filename))
+    {
+      std::error_code ignored_ec;
+      std::filesystem::remove(temp_filename, ignored_ec); // Ignore remove errors during cleanup
+    }
+    throw;                                                // Re-throw the original exception
   }
 
-  llvm::errs() << program_name << ": Failed to format \"" << filename << "\".\n";
-
-  if (ofile.is_open())
+  // --- 4. Finalize (Rename if necessary) ---
+  if (success && writing_to_temp_file)
   {
-    ofile.close();
-    std::filesystem::remove(temp_filename);
+    // Rename temporary file to original file
+    std::error_code ec;
+    std::filesystem::rename(temp_filename, filename, ec);
+    if (ec)
+    {
+      // If rename failed, try to remove the temp file and report error
+      std::error_code remove_ec;
+      std::filesystem::remove(temp_filename, remove_ec); // Attempt cleanup
+      throw std::runtime_error(
+        "Failed to rename temporary file '" + temp_filename.native() + "' to '" + filename.native() + "': " + ec.message());
+    }
+    // Success! Temporary file has been renamed.
   }
-}
+  // If success and not writing_to_temp_file, output went to stdout, nothing more to do.
 
-// Read one source file from `input` and write formatted result to `output`.
-void process_input_file(std::string const& input_filename, std::istream& input, std::ostream& output)
-{
-  SourceFile source_file(input_filename, input);
-  TranslationUnit TU{source_file COMMA_CWDEBUG_ONLY("TU:" + input_filename)};
-
-  std::cout << "Writing \"" << source_file.filename() << "\":\n";
-  TU.print(output);
+  // input_buffer went out of scope or was moved into process_input_buffer.
+  // temp_ofile goes out of scope, closing file if not already closed.
+  // stdin_content_holder goes out of scope.
 }
