@@ -24,52 +24,29 @@ include(AICxxSubmodules)
 #==============================================================================
 # cwformat
 
-find_package(LLVM REQUIRED CONFIG)
 find_package(Clang REQUIRED CONFIG)
+message(STATUS "Using ClangConfig.cmake in: ${Clang_DIR} (found version \"${LLVM_VERSION}\")")
 
-message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
-message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
+# We don't need this, as Clang already has a dependency on LLVM - and we're
+# not using different parts from LLVM that Clang isn't already needing.
+#find_package(LLVM REQUIRED CONFIG)
+#message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR} (found version \"${LLVM_PACKAGE_VERSION}\")")
 
 add_executable(cwformat cwformat.cxx View.cxx SourceFile.cxx TranslationUnit.cxx NoaContainer.cxx Parser.cxx DiagnosticConsumer.cxx)
 
-# Include LLVM directories.
-target_compile_definitions(cwformat PRIVATE ${LLVM_DEFINITIONS})
-target_include_directories(cwformat PRIVATE ${LLVM_INCLUDE_DIRS} ${CLANG_INCLUDE_DIRS})
+#target_compile_definitions(cwformat PRIVATE ${LLVM_DEFINITIONS})
+#target_include_directories(cwformat PRIVATE ${LLVM_INCLUDE_DIRS})
+target_include_directories(cwformat PRIVATE ${CLANG_INCLUDE_DIRS})
 
-# Get LLVM component libraries (e.g., Core, Support, etc.)
-llvm_map_components_to_libnames(LLVM_LIBS
-  Support
-  Core
-  Option
-  Demangle)
-
-# Manually specify Clang libraries (correct)
+# Manually specify Clang libraries.
 set(CLANG_LIBS
     clangBasic
-    clangFrontendTool
     clangLex
-    clangSerialization
-    # Add other needed Clang libraries:
-    # clangFrontend
-    # clangParse
-    # clangAST
-    # clangSema
+    clangFrontend       # clang::TextDiagnosticPrinter
 )
 
-# Link against LLVM and clang libraries.
 target_link_libraries(cwformat
   PRIVATE
-    ${LLVM_LIBS}
     ${CLANG_LIBS}
-    ${AICXX_OBJECTS_LIST}
-)
-
-add_executable(test DiagnosticConsumer.cxx)
-target_compile_definitions(test PRIVATE ${LLVM_DEFINITIONS})
-target_include_directories(test PRIVATE ${LLVM_INCLUDE_DIRS})
-target_link_libraries(test
-  PRIVATE
-    ${llvm_libs}
-    clang-cpp
     ${AICXX_OBJECTS_LIST}
 )
