@@ -66,6 +66,11 @@ void Parser::process_input_buffer(std::string const& input_filename_for_diagnost
     /*OwnsHeaderSearch=*/false                  // We own header_search_ in Parser.
     /*TUKind = TU_Complete*/);
 
+  // Initialize the Preprocessor with the TargetInfo stored in the Parser.
+  // target_info_ is an IntrusiveRefCntPtr; Initialize wants a TargetInfo const&.
+  // We dereference the pointer (*target_info_) to get the reference.
+  pp.Initialize(*target_info_);
+
   // 3. Configure the Preprocessor instance.
   pp.SetCommentRetentionState(/*KeepComments=*/true, /*KeepMacroComments=*/true); // Crucial for getting comments as tokens.
 
