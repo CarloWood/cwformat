@@ -1,11 +1,12 @@
 #include "sys.h"
-#include "clang/Lex/Preprocessor.h"
 #include "Parser.h"
+#include "libcwd/buf2str.h"
+#include "clang/Lex/Preprocessor.h"
 #include "utils/AIAlert.h"
+#include "MacroCallbackRecorder.h"
 
 Parser::Parser() :
-    diagnostic_ids_(new clang::DiagnosticIDs),
-    diagnostic_consumer_(llvm::errs(), diagnostic_options_.get()),
+    diagnostic_ids_(new clang::DiagnosticIDs), diagnostic_consumer_(llvm::errs(), diagnostic_options_.get()),
     diagnostics_engine_(diagnostic_ids_, diagnostic_options_, &diagnostic_consumer_, /*ShouldOwnClient=*/false),
     target_info_(Parser::create_target_info(diagnostics_engine_, target_options_)), file_manager_(file_system_options_),
     source_manager_(diagnostics_engine_, file_manager_),
@@ -19,171 +20,145 @@ clang::TargetInfo* Parser::create_target_info(
 {
   clang::TargetInfo* target_info = clang::TargetInfo::CreateTargetInfo(diagnostics_engine, target_options);
   if (!target_info)
-    THROW_ALERT("Unable to create target info for triple: [TRIPLE]", AIArgs("[TRIPLE]", target_options->Triple));
+    THROW_LALERT("Unable to create target info for triple: [TRIPLE]", AIArgs("[TRIPLE]", target_options->Triple));
   return target_info;
 };
 
-void Parser::process_input_buffer(std::string const& input_filename_for_diagnostics,
-  std::unique_ptr<llvm::MemoryBuffer> input_buffer, // Takes ownership
-  std::ostream& output)
+void Parser::process_input_buffer(
+  std::string const& input_filename_for_diagnostics, std::unique_ptr<llvm::MemoryBuffer> input_buffer, std::ostream& output)
 {
-  // 1. Register the buffer with SourceManager to get a FileID
-  // Note: createFileID takes ownership of the unique_ptr via std::move implicitly
-  //       if an rvalue reference overload is matched, or explicitly via std::move.
-  //       The signature takes llvm::MemoryBufferRef, so we need to get one.
-  // Alternative: Use the overload taking unique_ptr directly if available and preferred.
-  // Let's use the unique_ptr overload for clarity since we have one.
+  // --- 1. Setup FileID and SourceManager ---
+  llvm::MemoryBuffer const* input_buffer_ptr = input_buffer.get();
   clang::FileID fid = source_manager_.createFileID(std::move(input_buffer));
-  // input_buffer is now null, ownership transferred to SourceManager
-
-  // Tell the SourceManager that 'fid' represents the main source file.
+  if (fid.isInvalid())
+    THROW_LALERT("Unable to create FileID for input buffer: [FILENAME]", AIArgs("[FILENAME]", input_filename_for_diagnostics));
   source_manager_.setMainFileID(fid);
 
-  if (fid.isInvalid())
-  {
-    // Report error - using llvm::errs() or your logging mechanism
-    llvm::errs() << "Error: Could not create FileID for buffer '" << input_filename_for_diagnostics << "'\n";
-    // Or report via DiagnosticsEngine if possible/meaningful without a location
-    // Or write to the output stream
-    output << "Error: Failed to create FileID for input.\n";
-    return; // Cannot proceed without a valid FileID
-  }
+  // --- 2. Create Preprocessor ---
+  clang::Preprocessor pp(preprocessor_options_, diagnostics_engine_, lang_options_, source_manager_, header_search_, module_loader_,
+    /*IILookup=*/nullptr, /*OwnsHeaderSearch=*/false);
 
-  // --- Diagnostics specific to this buffer ---
-  // You might want to clear any previous errors if the DiagnosticsEngine is reused heavily,
-  // though typically errors are associated with SourceLocations within a specific FileID.
-  // diagnostics_engine_.Reset(); // Use cautiously if needed.
+  // --- 3. Attach Callbacks ---
+  std::vector<PreprocessorEvent> pp_events;
+  auto callback_recorder = std::make_unique<MacroCallbackRecorder>(pp, pp_events);
+  pp.addPPCallbacks(std::move(callback_recorder));
 
-  // 2. Create a *new* Preprocessor instance for this buffer
-  //    It uses the shared/reusable components from the Parser members.
-  clang::Preprocessor pp(preprocessor_options_, // Shared options
-    diagnostics_engine_,                        // Shared engine
-    lang_options_,                              // Shared LangOpts
-    source_manager_,                            // Shared SourceManager
-    header_search_,                             // Shared HeaderSearch
-    module_loader_,                             // Shared ModuleLoader
-    /*IdentifierInfoLookup=*/nullptr,           // Usually not needed for lexing only.
-    /*OwnsHeaderSearch=*/false                  // We own header_search_ in Parser.
-    /*TUKind = TU_Complete*/);
-
-  // Initialize the Preprocessor with the TargetInfo stored in the Parser.
-  // target_info_ is an IntrusiveRefCntPtr; Initialize wants a TargetInfo const&.
-  // We dereference the pointer (*target_info_) to get the reference.
+  // --- 4. Initialize Preprocessor & Configure ---
   pp.Initialize(*target_info_);
-
-  // 3. Configure the Preprocessor instance.
-  pp.SetCommentRetentionState(/*KeepComments=*/true, /*KeepMacroComments=*/true); // Crucial for getting comments as tokens.
-
-  // Optional: Further configure pp if needed (e.g., suppress include errors if you
-  // lex code that might have invalid #includes you want to ignore).
+  pp.SetCommentRetentionState(true, true);
   pp.SetSuppressIncludeNotFoundError(true);
 
-  // 4. Enter the source file into the Preprocessor.
-  // This sets up the lexer to start reading from the beginning of our FileID.
-  pp.EnterMainSourceFile(); // Use this when processing a single buffer as the main entry
+  // --- 5. Enter Main File ---
+  pp.EnterMainSourceFile();
 
-  // 5. The Tokenization Loop.
+  // --- 6. The Enhanced Tokenization Loop ---
+  Dout(dc::notice, "--- Tokens and Whitespace for " << input_filename_for_diagnostics << " ---");
   clang::Token tok;
-  output << "--- Tokens for " << input_filename_for_diagnostics << " ---\n";
+
+  clang::SourceLocation FileStartLoc = source_manager_.getLocForStartOfFile(fid);
+  unsigned LastOffset = 0; // Track the offset *after* the last processed entity *in this file*
 
   do
   {
-    // Fetch the next token from the buffer via the Preprocessor.
     pp.Lex(tok);
 
-    // Check for lexing errors reported *during* pp.Lex().
-    if (diagnostics_engine_.hasErrorOccurred())
-    {
-      output << "[Lexing Error Detected during token fetch]\n";
-      // You might want to stop, or clear the error and try to continue
-      // diagnostics_engine_.Reset(); // Reset error state if continuing
-      // break; // Or simply stop processing this buffer on error
-    }
-
-    // Exit loop cleanly on End-Of-File token.
     if (tok.is(clang::tok::eof))
     {
       break;
     }
 
-    // 6. Process the current Token 'tok'
-
-    clang::SourceLocation loc = tok.getLocation();
-
-    // A token MUST have a valid location unless it's EOF or an annotation token
-    if (loc.isInvalid())
+    clang::SourceLocation CurrentLoc = tok.getLocation();
+    if (CurrentLoc.isInvalid())
     {
-      // This might happen for special tokens (e.g., annotations), skip them
-      output << "[Skipping token with invalid location: Kind " << tok.getKind() << "]\n";
+      Dout(dc::notice, "[Skipping token with invalid location: Kind " << tok.getKind() << "]");
       continue;
     }
 
-    // Get location details (maps back to the original buffer)
-    // Use getSpellingLineNumber/ColumnNumber for locations in the original file
-    unsigned line = source_manager_.getSpellingLineNumber(loc);
-    unsigned col = source_manager_.getSpellingColumnNumber(loc);
-
-    // Get token kind and name
-    clang::tok::TokenKind kind = tok.getKind();
-    const char* tokenName = clang::tok::getTokenName(kind);
-
-    // Get token length in the source buffer
-    unsigned tokLen = tok.getLength();
-
-    // Get the actual text (spelling) of the token
-    // Using pp.getSpelling() is generally robust as it handles trigraphs,
-    // string literal concatenation nuances, etc.
-    std::string spelling = pp.getSpelling(tok);
-
-    // --- Output the token information to the provided ostream ---
-    output << "Line: " << line << ", Col: " << col << ", Kind: " << tokenName << " (" << kind << ")"
-           << ", Length: " << tokLen << ", Text: '";
-
-    // Escape special characters in the spelling for clearer output
-    for (char c : spelling)
+    // --- Check if the token's EXPANSION location is in our main file ---
+    if (!source_manager_.isInFileID(CurrentLoc, fid))
     {
-      switch (c)
-      {
-        case '\n':
-          output << "\\n";
-          break;
-        case '\t':
-          output << "\\t";
-          break;
-        case '\r':
-          output << "\\r";
-          break;
-        case '\\':
-          output << "\\\\";
-          break; // Escape backslash itself
-        case '\'':
-          output << "\\'";
-          break; // Escape single quote
-        default:
-          // Output printable characters directly
-          // Use isprint from <cctype>
-          if (std::isprint(static_cast<unsigned char>(c)))
-          {
-            output << c;
-          }
-          else
-          {
-            // Represent non-printable characters using hex escape codes
-            // Use llvm::format_hex_no_prefix from <llvm/Support/Format.h>
-            output << "\\x" << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(c);
-          }
-          break;     // Need break here
-      }
+      // This token's expansion location is not in the main file
+      // (e.g., maybe from a builtin if UsePredefines was true, or other complex cases).
+      // Print its info but don't use it for gap calculation in *this* file.
+      clang::SourceLocation SpellingLoc = source_manager_.getSpellingLoc(CurrentLoc);
+      unsigned SpellingLine = source_manager_.getSpellingLineNumber(SpellingLoc);
+      unsigned SpellingCol = source_manager_.getSpellingColumnNumber(SpellingLoc);
+      char const* tokenName = clang::tok::getTokenName(tok.getKind());
+      std::string spelling = pp.getSpelling(tok);
+
+      Dout(dc::notice, "Token(External): "
+             << " (Spelling: " << SpellingLine << ":" << SpellingCol << ")"
+             << ", Kind: " << tokenName << " (" << tok.getKind() << ")"
+             << ", Text: '" << /* escaping needed */ spelling << "'");
+      continue; // Skip gap calculation for this token
     }
-    output << "'\n"; // Close the single quote and add newline
 
-  } while (tok.isNot(clang::tok::eof)); // Continue until EOF is reached
+    // --- Token is in the main file ---
+    unsigned CurrentOffset = source_manager_.getFileOffset(CurrentLoc);
 
-  output << "--- End of Tokens for " << input_filename_for_diagnostics << " ---\n";
+    // --- Calculate Token Length IN THE FILE BUFFER ---
+    // Use Lexer::MeasureTokenLength for accuracy at the expansion location
+    unsigned LengthInFile = clang::Lexer::MeasureTokenLength(CurrentLoc, source_manager_, lang_options_);
+    unsigned CurrentEndOffset = CurrentOffset + LengthInFile;
 
-  // Optional: You might clear the FileID entries from the SourceManager
-  // if you are processing a huge number of files and memory is a concern,
-  // but only do this if you are sure you won't need any SourceLocations
-  // referring to this buffer later (e.g., for diagnostics reporting outside this loop).
-  // source_manager_.ClearFileEntries(fid); // Use with care!
+    // --- WHITESPACE/COMMENT/DIRECTIVE RECOVERY (Gap Calculation) ---
+    if (CurrentOffset < LastOffset)
+    {
+      // This shouldn't happen with correct logic, but indicates an overlap or error
+      Dout(dc::notice, "[Warning: Token offset " << CurrentOffset << " is before LastOffset " << LastOffset << ". Skipping gap.]");
+      // Avoid calculating a negative gap. Decide how to handle this - maybe reset LastOffset?
+      // For now, just skip the gap and process the token.
+    }
+    else if (CurrentOffset > LastOffset)
+    {
+      unsigned GapLength = CurrentOffset - LastOffset;
+      llvm::StringRef GapText(input_buffer_ptr->getBufferStart() + LastOffset, GapLength);
+
+      Dout(dc::notice, "Gap : FileOffset: " << LastOffset << ", Length: " << GapLength << ", Text: '" << buf2str(GapText.data(), GapText.size()) << "'");
+    }
+    // else CurrentOffset == LastOffset, means no gap, which is normal.
+
+    // --- PROCESS THE REGULAR TOKEN (that is in the main file) ---
+    unsigned ExpLine = source_manager_.getExpansionLineNumber(CurrentLoc);  // Line in the file
+    unsigned ExpCol = source_manager_.getExpansionColumnNumber(CurrentLoc); // Column in the file
+    clang::SourceLocation SpellingLoc = source_manager_.getSpellingLoc(CurrentLoc);
+    unsigned SpellingLine = source_manager_.getSpellingLineNumber(SpellingLoc);
+    unsigned SpellingCol = source_manager_.getSpellingColumnNumber(SpellingLoc);
+
+    clang::tok::TokenKind kind = tok.getKind();
+    char const* tokenName = clang::tok::getTokenName(kind);
+    std::string spelling = pp.getSpelling(tok);                           // Spelling (might differ from file text)
+
+    Dout(dc::notice, "Token: Line: " << ExpLine << ", Col: " << ExpCol    // Expansion/File Location
+           << " (Spelling: " << SpellingLine << ":" << SpellingCol << ")" // Spelling Location
+           << ", Kind: " << tokenName << " (" << kind << ")"
+           << ", FileOffset: " << CurrentOffset << ", LengthInFile: " << LengthInFile << ", Text: '" <<
+           buf2str(spelling.data(), spelling.size()) << "'");
+
+    // --- Update LastOffset to the position *after* this token IN THE FILE ---
+    LastOffset = CurrentEndOffset;
+
+  } while (tok.isNot(clang::tok::eof));
+
+  // --- Process any remaining gap at the end of the file ---
+  unsigned FileEndOffset = input_buffer_ptr->getBufferSize();
+  if (FileEndOffset > LastOffset)
+  {
+    unsigned GapLength = FileEndOffset - LastOffset;
+    llvm::StringRef GapText(input_buffer_ptr->getBufferStart() + LastOffset, GapLength);
+    Dout(dc::notice, "End of File Gap: FileOffset: " << LastOffset << ", Length: " << GapLength << ", Text: '" << buf2str(GapText.data(), GapText.size()) << "'");
+  }
+
+  Dout(dc::notice, "--- End of Tokens and Whitespace ---");
+  Dout(dc::notice, "--- Preprocessor Events ---");
+  // ... (Output pp_events as before) ...
+  for (auto const& event : pp_events)
+  {
+    // Use Expansion loc for line/col as it's often more relevant for where it occurred.
+    unsigned eventLine = source_manager_.getExpansionLineNumber(event.Location.getBegin());
+    unsigned eventCol = source_manager_.getExpansionColumnNumber(event.Location.getBegin());
+    std::string typeStr = (event.Type == PreprocessorEvent::MACRO_DEFINITION) ? "DEFINITION" : "EXPANSION";
+    Dout(dc::notice, "Event: Type: " << typeStr << ", Name: '" << event.Name << "'" << ", Line: " << eventLine << ", Col: " << eventCol);
+  }
+  Dout(dc::notice, "--- End of Preprocessor Events ---");
 }

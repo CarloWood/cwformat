@@ -3,6 +3,7 @@
 #include "SourceFile.h"
 #include "TranslationUnit.h"
 #include "Parser.h"
+#include "utils/AIAlert.h"
 
 #include <cerrno>
 #include <filesystem>
@@ -10,6 +11,8 @@
 #include <chrono>
 #include <random>
 #include <system_error>
+
+#include "debug.h"
 
 //=============================================================================
 // Command Line Options.
@@ -136,8 +139,38 @@ std::filesystem::path get_temp_filename(RandomNumber& rn, std::filesystem::path 
 // Forward declaration.
 void process_filename(Parser& parser, RandomNumber& rn, std::filesystem::path const& filename, bool use_cin);
 
+llvm::raw_ostream& operator<<(llvm::raw_ostream& os, AIAlert::Error const& error)
+{
+  int lines = 0;
+  for (auto& line : error.lines())
+    if (!line.is_prefix())
+      ++lines;
+  char const* indent_str = "\n    ";
+  if (lines > 1)
+    os << indent_str;
+  unsigned int suppress_mask = 0;
+  for (auto& line : error.lines())
+  {
+    if (line.suppressed(suppress_mask))
+      continue;
+    if (lines > 1 && line.prepend_newline())   // Empty line.
+      os << indent_str;
+    if (line.is_prefix())
+    {
+      os << line.getXmlDesc();
+      if (line.is_function_name() || line.is_filename_line())
+        os << ": ";
+    }
+    else
+      os << translate::getString(line.getXmlDesc(), line.args());
+  }
+  return os;
+}
+
 int main(int argc, char* argv[])
 {
+  Debug(NAMESPACE_DEBUG::init());
+
   // Set the program name.
   program_name = get_program_name(argv[0]);
 
@@ -220,6 +253,11 @@ int main(int argc, char* argv[])
     {
       process_filename(parser, rn, item.first, item.second);
     }
+    catch (AIAlert::Error const& error)
+    {
+      llvm::errs() << program_name << ": Error processing '" << (item.second ? "<stdin>" : item.first.native()) << "': " << error << "\n";
+      return_code = 1; // Mark failure
+    }
     catch (std::exception& e)
     {
       llvm::errs() << program_name << ": Error processing '" << (item.second ? "<stdin>" : item.first.native()) << "': " << e.what() << "\n";
@@ -254,10 +292,11 @@ int main(int argc, char* argv[])
 // Calls process_input_buffer for the actual processing.
 void process_filename(Parser& parser, RandomNumber& rn, std::filesystem::path const& filename, bool use_cin)
 {
+  std::string input_filename_str = use_cin ? "<stdin>" : filename.native();
+  std::string stdin_content_holder; // Must outlive input_buffer if getMemBuffer is used.
+
   // --- 1. Acquire Input Buffer ---
   std::unique_ptr<llvm::MemoryBuffer> input_buffer;
-  std::string input_filename_str = use_cin ? "<stdin>" : filename.native();
-  std::string stdin_content_holder; // Must outlive input_buffer if getMemBuffer is used
 
   if (use_cin)
   {
@@ -265,30 +304,20 @@ void process_filename(Parser& parser, RandomNumber& rn, std::filesystem::path co
     stdin_content_holder.assign((std::istreambuf_iterator<char>(std::cin)), (std::istreambuf_iterator<char>()));
 
     if (std::cin.bad())
-    {
-      throw std::runtime_error("Failed reading from stdin");
-    }
+      THROW_LALERT("Error reading from std::cin"); 
 
     // Create a MemoryBuffer *referencing* the string's data. No copy.
     // 'stdin_content_holder' MUST outlive the use of 'input_buffer'.
     input_buffer = llvm::MemoryBuffer::getMemBuffer(llvm::StringRef(stdin_content_holder), input_filename_str, /*RequiresNullTerminator=*/true);
-
-    if (!input_buffer)
-    {
-      throw std::runtime_error("Could not create MemoryBuffer for stdin content");
-      // (This is unlikely unless maybe out of memory for the buffer object itself)
-    }
   }
   else
   {
     // Use MemoryBuffer::getFile to memory-map or read the file.
     auto buffer_or_err = llvm::MemoryBuffer::getFile(filename.native(), -1, /*RequiresNullTerminator=*/true);
     if (!buffer_or_err)
-    {
-      // Propagate LLVM error as a runtime_error exception
-      throw std::runtime_error("Failed to open '" + filename.native() + "': " + buffer_or_err.getError().message());
-    }
-    // Move the buffer out of the Expected object
+      THROW_LALERTC(buffer_or_err.getError(), "Failed to open '[FILENAME]'", AIArgs("[FILENAME]", filename.native()));
+
+    // Move the buffer out of the Expected object.
     input_buffer = std::move(*buffer_or_err);
   }
 
@@ -301,18 +330,12 @@ void process_filename(Parser& parser, RandomNumber& rn, std::filesystem::path co
   if (writing_to_temp_file)
   {
     std::filesystem::path temp_filename_prefix = filename;
-    temp_filename_prefix += ".cwformat-tmp"; // Use a slightly different temp prefix
+    temp_filename_prefix += ".cwformat-tmp";
     temp_filename = get_temp_filename(rn, temp_filename_prefix);
 
-    // Note: ofstream constructor throws on failure if exceptions(badbit | failbit) is set.
-    // Default is goodbit, so check is_open() after construction.
     temp_ofile.open(temp_filename, std::ios::binary | std::ios::trunc);
     if (!temp_ofile.is_open())
-    {
-      // Get error details if possible (less reliable without exceptions enabled)
-      std::error_code ec(errno, std::system_category());
-      throw std::runtime_error("Failed to create temporary file '" + temp_filename.native() + "': " + ec.message());
-    }
+      THROW_LALERTE("Failed to create temporary file '[FILENAME]'", AIArgs("[FILENAME]", temp_filename.native()));
     output_stream_ptr = &temp_ofile; // Point to the file stream
   }
 
@@ -329,35 +352,33 @@ void process_filename(Parser& parser, RandomNumber& rn, std::filesystem::path co
     // Flush the output stream to ensure data is written and check for errors
     output_stream_ptr->flush();
     if (!output_stream_ptr->good())
-    {
-      throw std::runtime_error("Failed writing to output stream for " + input_filename_str);
-    }
+      THROW_LALERT("Failed writing to output stream for '[FILENAME]'", AIArgs("[FILENAME]", input_filename_str));
 
     // If we wrote to a temporary file, close it before renaming
     if (temp_ofile.is_open())
     {
       temp_ofile.close();
-      // Check state *after* closing
+      // Check state *after* closing.
       if (!temp_ofile.good())
       {
-        throw std::runtime_error("Failed writing or closing temporary file '" + temp_filename.native() + "'");
+        std::error_code ignored_ec;
+        std::filesystem::remove(temp_filename, ignored_ec);
+        THROW_LALERT("Failed closing temporary file '[FILENAME]'", AIArgs("[FILENAME]", temp_filename.native()));
       }
     }
-    success = true; // Mark success only if all steps complete without exceptions
+    success = true; // Mark success only if all steps complete without exceptions.
   }
   catch (...)
   {
     // Cleanup on error: If we created a temp file, remove it.
     if (temp_ofile.is_open())
-    {
       temp_ofile.close(); // Close first (might fail, ignore failure here)
-    }
     if (writing_to_temp_file && !temp_filename.empty() && std::filesystem::exists(temp_filename))
     {
       std::error_code ignored_ec;
-      std::filesystem::remove(temp_filename, ignored_ec); // Ignore remove errors during cleanup
+      std::filesystem::remove(temp_filename, ignored_ec); // Ignore remove errors during cleanup.
     }
-    throw;                                                // Re-throw the original exception
+    throw;                                                // Re-throw the original exception.
   }
 
   // --- 4. Finalize (Rename if necessary) ---
@@ -368,11 +389,9 @@ void process_filename(Parser& parser, RandomNumber& rn, std::filesystem::path co
     std::filesystem::rename(temp_filename, filename, ec);
     if (ec)
     {
-      // If rename failed, try to remove the temp file and report error
-      std::error_code remove_ec;
-      std::filesystem::remove(temp_filename, remove_ec); // Attempt cleanup
-      throw std::runtime_error(
-        "Failed to rename temporary file '" + temp_filename.native() + "' to '" + filename.native() + "': " + ec.message());
+      std::error_code ignored_ec;
+      std::filesystem::remove(temp_filename, ignored_ec);
+      THROW_LALERTC(ec, "Failed to rename temporary file '[FILENAME]' to '[NEWFILENAME]'", AIArgs("[FILENAME]", temp_filename.native())("[NEWFILENAME]", filename.native()));
     }
     // Success! Temporary file has been renamed.
   }
