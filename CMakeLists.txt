@@ -32,7 +32,7 @@ message(STATUS "Using ClangConfig.cmake in: ${Clang_DIR} (found version \"${LLVM
 #find_package(LLVM REQUIRED CONFIG)
 #message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR} (found version \"${LLVM_PACKAGE_VERSION}\")")
 
-add_executable(cwformat cwformat.cxx View.cxx SourceFile.cxx TranslationUnit.cxx NoaContainer.cxx ClangFrontend.cxx DiagnosticConsumer.cxx)
+add_executable(cwformat cwformat.cxx View.cxx SourceFile.cxx ClangFrontend.cxx DiagnosticConsumer.cxx)
 
 #target_compile_definitions(cwformat PRIVATE ${LLVM_DEFINITIONS})
 #target_include_directories(cwformat PRIVATE ${LLVM_INCLUDE_DIRS})
