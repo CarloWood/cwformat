@@ -1,21 +1,21 @@
 #include "sys.h"
-#include "Parser.h"
+#include "ClangFrontend.h"
 #include "libcwd/buf2str.h"
 #include "clang/Lex/Preprocessor.h"
 #include "utils/AIAlert.h"
 #include "MacroCallbackRecorder.h"
 
-Parser::Parser() :
+ClangFrontend::ClangFrontend() :
     diagnostic_ids_(new clang::DiagnosticIDs), diagnostic_consumer_(llvm::errs(), diagnostic_options_.get()),
     diagnostics_engine_(diagnostic_ids_, diagnostic_options_, &diagnostic_consumer_, /*ShouldOwnClient=*/false),
-    target_info_(Parser::create_target_info(diagnostics_engine_, target_options_)), file_manager_(file_system_options_),
+    target_info_(ClangFrontend::create_target_info(diagnostics_engine_, target_options_)), file_manager_(file_system_options_),
     source_manager_(diagnostics_engine_, file_manager_),
     header_search_(header_search_options_, source_manager_, diagnostics_engine_, lang_options_, target_info_.get())
 {
 }
 
 //static
-clang::TargetInfo* Parser::create_target_info(
+clang::TargetInfo* ClangFrontend::create_target_info(
   clang::DiagnosticsEngine& diagnostics_engine, std::shared_ptr<clang::TargetOptions> const& target_options)
 {
   clang::TargetInfo* target_info = clang::TargetInfo::CreateTargetInfo(diagnostics_engine, target_options);
@@ -24,7 +24,7 @@ clang::TargetInfo* Parser::create_target_info(
   return target_info;
 };
 
-void Parser::process_input_buffer(
+void ClangFrontend::process_input_buffer(
   std::string const& input_filename_for_diagnostics, std::unique_ptr<llvm::MemoryBuffer> input_buffer, std::ostream& output)
 {
   // --- 1. Setup FileID and SourceManager ---

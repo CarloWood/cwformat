@@ -151,7 +151,7 @@ class OptionsBase
   std::shared_ptr<clang::TargetOptions> target_options_{std::make_shared<TargetOptions>()};
 };
 
-class Parser : public OptionsBase
+class ClangFrontend : public OptionsBase
 {
  private:
   // Diagnostics Infrastructure.
@@ -172,7 +172,7 @@ class Parser : public OptionsBase
   clang::TrivialModuleLoader module_loader_;
 
  public:
-  Parser();
+  ClangFrontend();
 
   void process_input_buffer(std::string const& input_filename_for_diagnostics, std::unique_ptr<llvm::MemoryBuffer> input_buffer, std::ostream& output);
 

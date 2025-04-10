@@ -2,7 +2,7 @@
 
 #include "SourceFile.h"
 #include "TranslationUnit.h"
-#include "Parser.h"
+#include "ClangFrontend.h"
 #include "utils/AIAlert.h"
 
 #include <cerrno>
@@ -137,7 +137,7 @@ std::filesystem::path get_temp_filename(RandomNumber& rn, std::filesystem::path 
 // Main function; process commandline parameters.
 
 // Forward declaration.
-void process_filename(Parser& parser, RandomNumber& rn, std::filesystem::path const& filename, bool use_cin);
+void process_filename(ClangFrontend& clang_frontend, RandomNumber& rn, std::filesystem::path const& filename, bool use_cin);
 
 llvm::raw_ostream& operator<<(llvm::raw_ostream& os, AIAlert::Error const& error)
 {
@@ -240,8 +240,8 @@ int main(int argc, char* argv[])
   else if (in_place)
     llvm::outs() << "Files will be edited in-place\n";
 
-  // Create a Parser instance.
-  Parser parser;
+  // Create a ClangFrontend instance.
+  ClangFrontend clang_frontend;
   // Needed for temporary file name generation.
   RandomNumber rn;
 
@@ -251,7 +251,7 @@ int main(int argc, char* argv[])
   {
     try
     {
-      process_filename(parser, rn, item.first, item.second);
+      process_filename(clang_frontend, rn, item.first, item.second);
     }
     catch (AIAlert::Error const& error)
     {
@@ -290,7 +290,7 @@ int main(int argc, char* argv[])
 // the temporary file over the original (path) upon successful conversion.
 //
 // Calls process_input_buffer for the actual processing.
-void process_filename(Parser& parser, RandomNumber& rn, std::filesystem::path const& filename, bool use_cin)
+void process_filename(ClangFrontend& clang_frontend, RandomNumber& rn, std::filesystem::path const& filename, bool use_cin)
 {
   std::string input_filename_str = use_cin ? "<stdin>" : filename.native();
   std::string stdin_content_holder; // Must outlive input_buffer if getMemBuffer is used.
@@ -347,7 +347,7 @@ void process_filename(Parser& parser, RandomNumber& rn, std::filesystem::path co
   bool success = false;
   try
   {
-    parser.process_input_buffer(input_filename_str, std::move(input_buffer), *output_stream_ptr);
+    clang_frontend.process_input_buffer(input_filename_str, std::move(input_buffer), *output_stream_ptr);
 
     // Flush the output stream to ensure data is written and check for errors
     output_stream_ptr->flush();
