@@ -24,6 +24,25 @@ clang::TargetInfo* ClangFrontend::create_target_info(
   return target_info;
 };
 
+#ifdef CWDEBUG
+struct PrintSourceLocation
+{
+  clang::SourceManager& source_manager_;
+
+  explicit PrintSourceLocation(clang::SourceManager& source_manager) : source_manager_(source_manager) { }
+
+  std::string operator()(clang::SourceLocation loc) const
+  {
+    if (loc.isInvalid())
+      return "<invalid SourceLocation>";
+    std::pair<clang::FileID, unsigned int> location = source_manager_.getDecomposedLoc(loc);
+    unsigned int line = source_manager_.getLineNumber(location.first, location.second);
+    unsigned int column = source_manager_.getColumnNumber(location.first, location.second);
+    return std::to_string(line) + ":" + std::to_string(column);
+  }
+};
+#endif
+
 void ClangFrontend::process_input_buffer(
   std::string const& input_filename_for_diagnostics, std::unique_ptr<llvm::MemoryBuffer> input_buffer, std::ostream& output)
 {
@@ -58,14 +77,16 @@ void ClangFrontend::process_input_buffer(
   clang::SourceLocation FileStartLoc = source_manager_.getLocForStartOfFile(fid);
   unsigned LastOffset = 0; // Track the offset *after* the last processed entity *in this file*
 
+#ifdef CWDEBUG
+  PrintSourceLocation print_source_location(source_manager_);
+#endif
+
   do
   {
     pp.Lex(tok);
 
     if (tok.is(clang::tok::eof))
-    {
       break;
-    }
 
     clang::SourceLocation CurrentLoc = tok.getLocation();
     if (CurrentLoc.isInvalid())
@@ -81,15 +102,14 @@ void ClangFrontend::process_input_buffer(
       // (e.g., maybe from a builtin if UsePredefines was true, or other complex cases).
       // Print its info but don't use it for gap calculation in *this* file.
       clang::SourceLocation SpellingLoc = source_manager_.getSpellingLoc(CurrentLoc);
-      unsigned SpellingLine = source_manager_.getSpellingLineNumber(SpellingLoc);
-      unsigned SpellingCol = source_manager_.getSpellingColumnNumber(SpellingLoc);
       char const* tokenName = clang::tok::getTokenName(tok.getKind());
       std::string spelling = pp.getSpelling(tok);
 
       Dout(dc::notice, "Token(External): "
-             << " (Spelling: " << SpellingLine << ":" << SpellingCol << ")"
+             << " (Spelling: " << print_source_location(SpellingLoc) << ")"
              << ", Kind: " << tokenName << " (" << tok.getKind() << ")"
              << ", Text: '" << /* escaping needed */ spelling << "'");
+
       continue; // Skip gap calculation for this token
     }
 
@@ -122,15 +142,13 @@ void ClangFrontend::process_input_buffer(
     unsigned ExpLine = source_manager_.getExpansionLineNumber(CurrentLoc);  // Line in the file
     unsigned ExpCol = source_manager_.getExpansionColumnNumber(CurrentLoc); // Column in the file
     clang::SourceLocation SpellingLoc = source_manager_.getSpellingLoc(CurrentLoc);
-    unsigned SpellingLine = source_manager_.getSpellingLineNumber(SpellingLoc);
-    unsigned SpellingCol = source_manager_.getSpellingColumnNumber(SpellingLoc);
 
     clang::tok::TokenKind kind = tok.getKind();
     char const* tokenName = clang::tok::getTokenName(kind);
     std::string spelling = pp.getSpelling(tok);                           // Spelling (might differ from file text)
 
     Dout(dc::notice, "Token: Line: " << ExpLine << ", Col: " << ExpCol    // Expansion/File Location
-           << " (Spelling: " << SpellingLine << ":" << SpellingCol << ")" // Spelling Location
+           << " (Spelling: " << print_source_location(SpellingLoc) << ")" // Spelling Location
            << ", Kind: " << tokenName << " (" << kind << ")"
            << ", FileOffset: " << CurrentOffset << ", LengthInFile: " << LengthInFile << ", Text: '" <<
            buf2str(spelling.data(), spelling.size()) << "'");
