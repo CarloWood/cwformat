@@ -3,16 +3,6 @@
 #include <iterator>
 #include <sstream>
 
-SourceFile::iterator SourceFile::begin() const
-{
-  return content_->getBufferStart();
-}
-
-SourceFile::iterator SourceFile::end() const
-{
-  return content_->getBufferEnd();
-}
-
 char SourceFile::peek(SourceFile::iterator pos) const
 {
   return pos[1];

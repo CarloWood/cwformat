@@ -1,7 +1,6 @@
 #include "sys.h"
 
 #include "SourceFile.h"
-#include "TranslationUnit.h"
 #include "ClangFrontend.h"
 #include "utils/AIAlert.h"
 
@@ -339,15 +338,23 @@ void process_filename(ClangFrontend& clang_frontend, RandomNumber& rn, std::file
     output_stream_ptr = &temp_ofile; // Point to the file stream
   }
 
-  // --- 3. Process the Buffer ---
-  // output_stream_ptr is either &std::cout or &temp_ofile
-  // input_buffer holds the data (ownership will be passed)
-  // Use a try-finally like structure for cleanup (RAII with ofstream helps)
+  // Create a SourceFile object from the input buffer.
+  SourceFile const source_file(input_filename_str, std::move(input_buffer));
+  // Create a TranslationUnit object to hold the result.
+  TranslationUnit translation_unit(clang_frontend, source_file COMMA_CWDEBUG_ONLY(input_filename_str));
+
+  // --- 3. Process the SourceFile ---
+  // output_stream_ptr is either &std::cout or &temp_ofile.
+  // source_file holds the data.
+  // Use a try-finally like structure for cleanup (RAII with ofstream helps).
 
   bool success = false;
   try
   {
-    clang_frontend.process_input_buffer(input_filename_str, std::move(input_buffer), *output_stream_ptr);
+    // Read the source_file into translation_unit.
+    translation_unit.process(source_file);
+    // Write the result to the output stream.
+    translation_unit.print(*output_stream_ptr);
 
     // Flush the output stream to ensure data is written and check for errors
     output_stream_ptr->flush();
@@ -384,6 +391,7 @@ void process_filename(ClangFrontend& clang_frontend, RandomNumber& rn, std::file
   // --- 4. Finalize (Rename if necessary) ---
   if (success && writing_to_temp_file)
   {
+#if -0
     // Rename temporary file to original file
     std::error_code ec;
     std::filesystem::rename(temp_filename, filename, ec);
@@ -394,6 +402,9 @@ void process_filename(ClangFrontend& clang_frontend, RandomNumber& rn, std::file
       THROW_LALERTC(ec, "Failed to rename temporary file '[FILENAME]' to '[NEWFILENAME]'", AIArgs("[FILENAME]", temp_filename.native())("[NEWFILENAME]", filename.native()));
     }
     // Success! Temporary file has been renamed.
+#else
+    Dout(dc::warning, "Not renaming temporary file '" << temp_filename.native() << "' to '" << filename.native() << "'; writing to disk isn't implemented yet.");
+#endif
   }
   // If success and not writing_to_temp_file, output went to stdout, nothing more to do.
 

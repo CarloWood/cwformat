@@ -1,6 +1,8 @@
 #pragma once
 
 #include "DiagnosticConsumer.h"
+#include "TranslationUnit.h"
+#include "SourceFile.h"
 
 #include "clang/Basic/DiagnosticOptions.h"
 #include "clang/Basic/FileSystemOptions.h"
@@ -158,7 +160,7 @@ class ClangFrontend : public OptionsBase
 //  DiagnosticConsumer diagnostic_consumer_;
   clang::TextDiagnosticPrinter diagnostic_consumer_;
   llvm::IntrusiveRefCntPtr<clang::DiagnosticIDs> diagnostic_ids_;
-  clang::DiagnosticsEngine diagnostics_engine_;
+  mutable clang::DiagnosticsEngine diagnostics_engine_;
 
   // Language and Target.
   llvm::IntrusiveRefCntPtr<clang::TargetInfo> target_info_;
@@ -174,7 +176,18 @@ class ClangFrontend : public OptionsBase
  public:
   ClangFrontend();
 
-  void process_input_buffer(std::string const& input_filename_for_diagnostics, std::unique_ptr<llvm::MemoryBuffer> input_buffer, std::ostream& output);
+  clang::FileID create_file_id(SourceFile const& source_file)
+  {
+    return source_manager_.createFileID(source_file.get_memory_buffer_ref());
+  }
+
+  void set_main_file_id(clang::FileID file_id)
+  {
+    source_manager_.setMainFileID(file_id);
+  }
+
+  // Reads from input_buffer and writes to translation_unit.
+  void process_input_buffer(SourceFile const& source_file, TranslationUnit& translation_unit) const;
 
  private:
   static clang::TargetInfo* create_target_info(clang::DiagnosticsEngine& diagnostics_engine, std::shared_ptr<clang::TargetOptions> const& target_options);

@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "ClangFrontend.h"
+#include "SourceFile.h"
 #include "libcwd/buf2str.h"
 #include "clang/Lex/Preprocessor.h"
 #include "utils/AIAlert.h"
@@ -27,9 +28,9 @@ clang::TargetInfo* ClangFrontend::create_target_info(
 #ifdef CWDEBUG
 struct PrintSourceLocation
 {
-  clang::SourceManager& source_manager_;
+  clang::SourceManager const& source_manager_;
 
-  explicit PrintSourceLocation(clang::SourceManager& source_manager) : source_manager_(source_manager) { }
+  explicit PrintSourceLocation(clang::SourceManager const& source_manager) : source_manager_(source_manager) { }
 
   std::string operator()(clang::SourceLocation loc) const
   {
@@ -43,18 +44,13 @@ struct PrintSourceLocation
 };
 #endif
 
-void ClangFrontend::process_input_buffer(
-  std::string const& input_filename_for_diagnostics, std::unique_ptr<llvm::MemoryBuffer> input_buffer, std::ostream& output)
+void ClangFrontend::process_input_buffer(SourceFile const& source_file, TranslationUnit& translation_unit) const
 {
-  // --- 1. Setup FileID and SourceManager ---
-  llvm::MemoryBuffer const* input_buffer_ptr = input_buffer.get();
-  clang::FileID fid = source_manager_.createFileID(std::move(input_buffer));
-  if (fid.isInvalid())
-    THROW_LALERT("Unable to create FileID for input buffer: [FILENAME]", AIArgs("[FILENAME]", input_filename_for_diagnostics));
-  source_manager_.setMainFileID(fid);
-
   // --- 2. Create Preprocessor ---
-  clang::Preprocessor pp(preprocessor_options_, diagnostics_engine_, lang_options_, source_manager_, header_search_, module_loader_,
+  clang::Preprocessor pp(preprocessor_options_, diagnostics_engine_, lang_options_,
+      const_cast<clang::SourceManager&>(source_manager_),
+      const_cast<clang::HeaderSearch&>(header_search_),
+      const_cast<clang::TrivialModuleLoader&>(module_loader_),
     /*IILookup=*/nullptr, /*OwnsHeaderSearch=*/false);
 
   // --- 3. Attach Callbacks ---
@@ -71,10 +67,10 @@ void ClangFrontend::process_input_buffer(
   pp.EnterMainSourceFile();
 
   // --- 6. The Enhanced Tokenization Loop ---
-  Dout(dc::notice, "--- Tokens and Whitespace for " << input_filename_for_diagnostics << " ---");
+  Dout(dc::notice, "--- Tokens and Whitespace for " << source_file.filename() << " ---");
   clang::Token tok;
 
-  clang::SourceLocation FileStartLoc = source_manager_.getLocForStartOfFile(fid);
+  clang::SourceLocation FileStartLoc = source_manager_.getLocForStartOfFile(translation_unit.file_id());
   unsigned LastOffset = 0; // Track the offset *after* the last processed entity *in this file*
 
 #ifdef CWDEBUG
@@ -96,7 +92,7 @@ void ClangFrontend::process_input_buffer(
     }
 
     // --- Check if the token's EXPANSION location is in our main file ---
-    if (!source_manager_.isInFileID(CurrentLoc, fid))
+    if (!source_manager_.isInFileID(CurrentLoc, translation_unit.file_id()))
     {
       // This token's expansion location is not in the main file
       // (e.g., maybe from a builtin if UsePredefines was true, or other complex cases).
@@ -132,7 +128,7 @@ void ClangFrontend::process_input_buffer(
     else if (CurrentOffset > LastOffset)
     {
       unsigned GapLength = CurrentOffset - LastOffset;
-      llvm::StringRef GapText(input_buffer_ptr->getBufferStart() + LastOffset, GapLength);
+      llvm::StringRef GapText(source_file.begin() + LastOffset, GapLength);
 
       Dout(dc::notice, "Gap : FileOffset: " << LastOffset << ", Length: " << GapLength << ", Text: '" << buf2str(GapText.data(), GapText.size()) << "'");
     }
@@ -159,11 +155,11 @@ void ClangFrontend::process_input_buffer(
   } while (tok.isNot(clang::tok::eof));
 
   // --- Process any remaining gap at the end of the file ---
-  unsigned FileEndOffset = input_buffer_ptr->getBufferSize();
+  unsigned FileEndOffset = source_file.size();
   if (FileEndOffset > LastOffset)
   {
     unsigned GapLength = FileEndOffset - LastOffset;
-    llvm::StringRef GapText(input_buffer_ptr->getBufferStart() + LastOffset, GapLength);
+    llvm::StringRef GapText(source_file.begin() + LastOffset, GapLength);
     Dout(dc::notice, "End of File Gap: FileOffset: " << LastOffset << ", Length: " << GapLength << ", Text: '" << buf2str(GapText.data(), GapText.size()) << "'");
   }
 

@@ -1,22 +1,29 @@
 #pragma once
 
-#include "SourceFile.h"
 #include "NoaContainer.h"
+#include "clang/Basic/SourceLocation.h"
 #include "debug.h"
+
+class ClangFrontend;
+class SourceFile;
 
 class TranslationUnit : public NoaContainer
 {
  private:
-  SourceFile source_file_;
+  ClangFrontend const& clang_frontend_;
+  clang::FileID file_id_;                           // The file ID of this translation unit.
 
 #ifdef CWDEBUG
   std::string name_;
 #endif
 
  public:
-  TranslationUnit(SourceFile&& source_file COMMA_CWDEBUG_ONLY(std::string const& name));
+  TranslationUnit(ClangFrontend& clang_frontend, SourceFile const& source_file COMMA_CWDEBUG_ONLY(std::string const& name));
 
-  SourceFile const& source_file() const { return source_file_; }
+  void process(SourceFile const& source_file);
 
+  clang::FileID file_id() const { return file_id_; }
+
+  std::string const& name() const { return name_; }
   void print(std::ostream& os) const;
 };
