@@ -5,6 +5,9 @@
 #include "clang/Lex/Preprocessor.h"
 #include "utils/AIAlert.h"
 #include "MacroCallbackRecorder.h"
+#ifdef CWDEBUG
+#include "debug_ostream_operators.h"
+#endif
 
 ClangFrontend::ClangFrontend() :
     diagnostic_ids_(new clang::DiagnosticIDs), diagnostic_consumer_(llvm::errs(), diagnostic_options_.get()),
@@ -45,29 +48,6 @@ clang::TargetInfo* ClangFrontend::create_target_info(
   return target_info;
 };
 
-#ifdef CWDEBUG
-struct PrintSourceLocation
-{
-  clang::SourceManager const& source_manager_;
-
-  explicit PrintSourceLocation(clang::SourceManager const& source_manager) : source_manager_(source_manager) { }
-
-  std::string operator()(clang::SourceLocation loc) const
-  {
-    if (loc.isInvalid())
-      return "<invalid SourceLocation>";
-    if (loc.isMacroID())
-    {
-      return "<macro>" + loc.printToString(source_manager_) + "</macro>";
-    }
-    std::pair<clang::FileID, unsigned int> location = source_manager_.getDecomposedLoc(loc);
-    unsigned int line = source_manager_.getLineNumber(location.first, location.second);
-    unsigned int column = source_manager_.getColumnNumber(location.first, location.second);
-    return std::to_string(line) + ":" + std::to_string(column);
-  }
-};
-#endif
-
 void ClangFrontend::process_input_buffer(SourceFile const& source_file, TranslationUnit& translation_unit) const
 {
   clang::Preprocessor& pp = translation_unit.get_pp();
@@ -90,7 +70,6 @@ void ClangFrontend::process_input_buffer(SourceFile const& source_file, Translat
   clang::Token tok;
 
   clang::SourceLocation FileStartLoc = source_manager_.getLocForStartOfFile(translation_unit.file_id());
-  unsigned LastOffset = 0; // Track the offset *after* the last processed entity *in this file*
 
 #ifdef CWDEBUG
   PrintSourceLocation print_source_location(source_manager_);
@@ -103,100 +82,49 @@ void ClangFrontend::process_input_buffer(SourceFile const& source_file, Translat
 
     // Stop if we reached the end of the file.
     if (tok.is(clang::tok::eof))
-      break;
-
-    clang::SourceLocation CurrentLoc = tok.getLocation();
-    Dout(dc::notice, "CurrentLoc = " << print_source_location(CurrentLoc));
-
-    // --- Check if the token's EXPANSION location is in our main file ---
-    if (!source_manager_.isInFileID(CurrentLoc, translation_unit.file_id()))
     {
-      // This token's expansion location is not in the main file
-      // (e.g., maybe from a builtin if UsePredefines was true, or other complex cases).
-      // Print its info but don't use it for gap calculation in *this* file.
-      clang::SourceLocation SpellingLoc = source_manager_.getSpellingLoc(CurrentLoc);
+      translation_unit.eof();
+      break;
+    }
+
+    clang::SourceLocation current_location = tok.getLocation();
+    Dout(dc::notice, "current_location = " << print_source_location(current_location));
+
+    if (!source_manager_.isInFileID(current_location, translation_unit.file_id()))
+    {
+      // This token's expansion location is not in the main file (e.g., maybe from a builtin
+      // if UsePredefines was true, or it was generated from a macro catenation).
+
+      // Print its info but don't use it for gap calculation.
+      clang::SourceLocation spelling_location = source_manager_.getSpellingLoc(current_location);
       char const* tokenName = clang::tok::getTokenName(tok.getKind());
       std::string spelling = pp.getSpelling(tok);
 
       Dout(dc::notice, "Token(External): "
              << ", Kind: " << tokenName << " (" << tok.getKind() << ")"
-             << ", Text: '" << /* escaping needed */ spelling << "'");
-      clang::SourceLocation ExpansionLoc = source_manager_.getExpansionLoc(CurrentLoc);
+             << ", Text: '" << buf2str(spelling.data(), spelling.size()) << "'");
+      clang::SourceLocation ExpansionLoc = source_manager_.getExpansionLoc(current_location);
       Dout(dc::notice, "ExpansionLoc = " << print_source_location(ExpansionLoc));
-      Dout(dc::notice, "SpellingLoc = " << print_source_location(SpellingLoc));
-      if (!source_manager_.isInFileID(SpellingLoc, translation_unit.file_id()))
-      {
-        clang::SourceLocation SpellingLoc2 = source_manager_.getSpellingLoc(SpellingLoc);
-        Dout(dc::notice, "SpellingLoc2 = " << print_source_location(SpellingLoc2));
-      }
+      Dout(dc::notice, "spelling_location = " << print_source_location(spelling_location));
 
-      continue; // Skip gap calculation for this token
+      continue; // Skip gap calculation for this token.
     }
 
-    // --- Token is in the main file ---
-    unsigned CurrentOffset = source_manager_.getFileOffset(CurrentLoc);
+    // Token is in the main file.
+    unsigned int current_offset = source_manager_.getFileOffset(current_location);
+    size_t token_length = clang::Lexer::MeasureTokenLength(current_location, source_manager_, lang_options_);
 
-    // --- Calculate Token Length IN THE FILE BUFFER ---
-    // Use Lexer::MeasureTokenLength for accuracy at the expansion location
-    unsigned LengthInFile = clang::Lexer::MeasureTokenLength(CurrentLoc, source_manager_, lang_options_);
-    unsigned CurrentEndOffset = CurrentOffset + LengthInFile;
-
-    // --- WHITESPACE/COMMENT/DIRECTIVE RECOVERY (Gap Calculation) ---
-    if (CurrentOffset < LastOffset)
-    {
-      // This shouldn't happen with correct logic, but indicates an overlap or error
-      Dout(dc::notice, "[Warning: Token offset " << CurrentOffset << " is before LastOffset " << LastOffset << ". Skipping gap.]");
-      // Avoid calculating a negative gap. Decide how to handle this - maybe reset LastOffset?
-      // For now, just skip the gap and process the token.
-    }
-    else if (CurrentOffset > LastOffset)
-    {
-      unsigned GapLength = CurrentOffset - LastOffset;
-      llvm::StringRef GapText(source_file.begin() + LastOffset, GapLength);
-
-      Dout(dc::notice, "Gap : FileOffset: " << LastOffset << ", Length: " << GapLength << ", Text: '" << buf2str(GapText.data(), GapText.size()) << "'");
-    }
-    // else CurrentOffset == LastOffset, means no gap, which is normal.
-
-    // --- PROCESS THE REGULAR TOKEN (that is in the main file) ---
-    unsigned ExpLine = source_manager_.getExpansionLineNumber(CurrentLoc);  // Line in the file
-    unsigned ExpCol = source_manager_.getExpansionColumnNumber(CurrentLoc); // Column in the file
-    clang::SourceLocation SpellingLoc = source_manager_.getSpellingLoc(CurrentLoc);
-
-    clang::tok::TokenKind kind = tok.getKind();
-    char const* tokenName = clang::tok::getTokenName(kind);
-    std::string spelling = pp.getSpelling(tok);                           // Spelling (might differ from file text)
-
-    Dout(dc::notice, "Token: Line: " << ExpLine << ", Col: " << ExpCol    // Expansion/File Location
-           << " (Spelling: " << print_source_location(SpellingLoc) << ")" // Spelling Location
-           << ", Kind: " << tokenName << " (" << kind << ")"
-           << ", FileOffset: " << CurrentOffset << ", LengthInFile: " << LengthInFile << ", Text: '" <<
-           buf2str(spelling.data(), spelling.size()) << "'");
-
-    // --- Update LastOffset to the position *after* this token IN THE FILE ---
-    LastOffset = CurrentEndOffset;
-
-    // --- Add the token to the translation unit ---
-    translation_unit.add_input_token(tok, CurrentOffset, LengthInFile, ExpLine, ExpCol);
+    // Add the token to the translation unit.
+    translation_unit.add_input_token(current_location, tok, current_offset, token_length);
   }
-
-  // --- Process any remaining gap at the end of the file ---
-  unsigned FileEndOffset = source_file.size();
-  if (FileEndOffset > LastOffset)
-  {
-    unsigned GapLength = FileEndOffset - LastOffset;
-    llvm::StringRef GapText(source_file.begin() + LastOffset, GapLength);
-    Dout(dc::notice, "End of File Gap: FileOffset: " << LastOffset << ", Length: " << GapLength << ", Text: '" << buf2str(GapText.data(), GapText.size()) << "'");
-  }
-
   Dout(dc::notice, "--- End of Tokens and Whitespace ---");
   Dout(dc::notice, "--- Preprocessor Events ---");
   // ... (Output pp_events as before) ...
   for (auto const& event : pp_events)
   {
     // Use Expansion loc for line/col as it's often more relevant for where it occurred.
-    unsigned eventLine = source_manager_.getExpansionLineNumber(event.Location.getBegin());
-    unsigned eventCol = source_manager_.getExpansionColumnNumber(event.Location.getBegin());
+    unsigned int eventLine = source_manager_.getExpansionLineNumber(event.Location.getBegin());
+    unsigned int eventCol = source_manager_.getExpansionColumnNumber(event.Location.getBegin());
     std::string typeStr = (event.Type == PreprocessorEvent::MACRO_DEFINITION) ? "DEFINITION" : "EXPANSION";
     Dout(dc::notice, "Event: Type: " << typeStr << ", Name: '" << event.Name << "'" << ", Line: " << eventLine << ", Col: " << eventCol);
   }

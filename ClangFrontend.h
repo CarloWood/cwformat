@@ -175,6 +175,8 @@ class ClangFrontend : public OptionsBase
   void begin_source_file(SourceFile const& source_file, TranslationUnit& translation_unit);
   void end_source_file();
 
+  clang::SourceManager const& source_manager() const { return source_manager_; }
+
   // Reads from input_buffer and writes to translation_unit.
   void process_input_buffer(SourceFile const& source_file, TranslationUnit& translation_unit) const;
 

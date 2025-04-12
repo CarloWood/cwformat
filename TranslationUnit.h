@@ -21,6 +21,7 @@ class TranslationUnit : public NoaContainer
   SourceFile const& source_file_;
   clang::FileID file_id_;                               // The file ID of this translation unit.
   std::unique_ptr<clang::Preprocessor> preprocessor_;   // A preprocessor instance used for this translation unit.
+  unsigned int last_offset_;
 
 #ifdef CWDEBUG
   std::string name_;
@@ -31,7 +32,8 @@ class TranslationUnit : public NoaContainer
   ~TranslationUnit();
 
   void process(SourceFile const& source_file);
-  void add_input_token(clang::Token const& token, unsigned int offset, unsigned int length, unsigned int line, unsigned int col);
+  void add_input_token(clang::SourceLocation current_location, clang::Token const& token, unsigned int current_offset, size_t token_length);
+  void eof();
 
   SourceFile const& source_file() const { return source_file_; }
   clang::FileID file_id() const { return file_id_; }
