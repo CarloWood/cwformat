@@ -1,29 +1,25 @@
 #pragma once
 
-#include "DiagnosticConsumer.h"
-#include "TranslationUnit.h"
-#include "SourceFile.h"
-
+#include "clang/Basic/DiagnosticIDs.h"
 #include "clang/Basic/DiagnosticOptions.h"
+#include "clang/Basic/FileManager.h"
 #include "clang/Basic/FileSystemOptions.h"
 #include "clang/Basic/LangOptions.h"
-#include "clang/Lex/HeaderSearchOptions.h"
-#include "clang/Lex/PreprocessorOptions.h"
-#include "clang/Basic/TargetOptions.h"
-
-#include "clang/Basic/DiagnosticIDs.h"
-#include "clang/Basic/TargetInfo.h"
-#include "clang/Basic/FileManager.h"
 #include "clang/Basic/SourceManager.h"
-#include "clang/Lex/HeaderSearch.h"
-#include "clang/Lex/ModuleLoader.h"
-#include "llvm/TargetParser/Host.h"
-
+#include "clang/Basic/TargetInfo.h"
+#include "clang/Basic/TargetOptions.h"
 #include "clang/Frontend/TextDiagnosticPrinter.h"
-
+#include "clang/Lex/HeaderSearch.h"
+#include "clang/Lex/HeaderSearchOptions.h"
+#include "clang/Lex/ModuleLoader.h"
+#include "clang/Lex/PreprocessorOptions.h"
+#include "llvm/TargetParser/Host.h"
 #include <iostream>
 #include <memory>
 #include <string>
+#include "DiagnosticConsumer.h"
+#include "SourceFile.h"
+#include "TranslationUnit.h"
 
 struct DiagnosticOptions : clang::DiagnosticOptions
 {
@@ -147,7 +143,7 @@ class OptionsBase
   llvm::IntrusiveRefCntPtr<DiagnosticOptions> diagnostic_options_{new DiagnosticOptions};
   FileSystemOptions file_system_options_;
   LangOptions lang_options_;
-  HeaderSearchOptions header_search_options_;   // llvm-project master. For older versions use:
+  HeaderSearchOptions header_search_options_; // llvm-project master. For older versions use:
   //std::shared_ptr<clang::HeaderSearchOptions> header_search_options_{std::make_shared<HeaderSearchOptions>()};
   std::shared_ptr<clang::PreprocessorOptions> preprocessor_options_{std::make_shared<PreprocessorOptions>()};
   std::shared_ptr<clang::TargetOptions> target_options_{std::make_shared<TargetOptions>()};
@@ -157,7 +153,7 @@ class ClangFrontend : public OptionsBase
 {
  private:
   // Diagnostics Infrastructure.
-//  DiagnosticConsumer diagnostic_consumer_;
+  //  DiagnosticConsumer diagnostic_consumer_;
   clang::TextDiagnosticPrinter diagnostic_consumer_;
   llvm::IntrusiveRefCntPtr<clang::DiagnosticIDs> diagnostic_ids_;
   mutable clang::DiagnosticsEngine diagnostics_engine_;
@@ -176,19 +172,13 @@ class ClangFrontend : public OptionsBase
  public:
   ClangFrontend();
 
-  clang::FileID create_file_id(SourceFile const& source_file)
-  {
-    return source_manager_.createFileID(source_file.get_memory_buffer_ref());
-  }
-
-  void set_main_file_id(clang::FileID file_id)
-  {
-    source_manager_.setMainFileID(file_id);
-  }
+  void begin_source_file(SourceFile const& source_file, TranslationUnit& translation_unit);
+  void end_source_file();
 
   // Reads from input_buffer and writes to translation_unit.
   void process_input_buffer(SourceFile const& source_file, TranslationUnit& translation_unit) const;
 
  private:
-  static clang::TargetInfo* create_target_info(clang::DiagnosticsEngine& diagnostics_engine, std::shared_ptr<clang::TargetOptions> const& target_options);
+  static clang::TargetInfo* create_target_info(
+    clang::DiagnosticsEngine& diagnostics_engine, std::shared_ptr<clang::TargetOptions> const& target_options);
 };

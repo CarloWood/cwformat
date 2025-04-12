@@ -15,6 +15,26 @@ ClangFrontend::ClangFrontend() :
 {
 }
 
+void ClangFrontend::begin_source_file(SourceFile const& source_file, TranslationUnit& translation_unit)
+{
+  clang::FileID file_id = source_manager_.createFileID(source_file.get_memory_buffer_ref());
+  if (file_id.isInvalid())
+    THROW_LALERT("Unable to create FileID for input buffer: [FILENAME]", AIArgs("[FILENAME]", source_file.filename()));
+  source_manager_.setMainFileID(file_id);
+
+  auto preprocessor = std::make_unique<clang::Preprocessor>(preprocessor_options_, diagnostics_engine_, lang_options_,
+      source_manager_, header_search_, module_loader_, /*IILookup=*/nullptr, /*OwnsHeaderSearch=*/false);
+
+  diagnostic_consumer_.BeginSourceFile(lang_options_, preprocessor.get());
+
+  translation_unit.init(file_id, std::move(preprocessor));
+}
+
+void ClangFrontend::end_source_file()
+{
+  diagnostic_consumer_.EndSourceFile();
+}
+
 //static
 clang::TargetInfo* ClangFrontend::create_target_info(
   clang::DiagnosticsEngine& diagnostics_engine, std::shared_ptr<clang::TargetOptions> const& target_options)
@@ -36,6 +56,10 @@ struct PrintSourceLocation
   {
     if (loc.isInvalid())
       return "<invalid SourceLocation>";
+    if (loc.isMacroID())
+    {
+      return "<macro>" + loc.printToString(source_manager_) + "</macro>";
+    }
     std::pair<clang::FileID, unsigned int> location = source_manager_.getDecomposedLoc(loc);
     unsigned int line = source_manager_.getLineNumber(location.first, location.second);
     unsigned int column = source_manager_.getColumnNumber(location.first, location.second);
@@ -46,12 +70,7 @@ struct PrintSourceLocation
 
 void ClangFrontend::process_input_buffer(SourceFile const& source_file, TranslationUnit& translation_unit) const
 {
-  // --- 2. Create Preprocessor ---
-  clang::Preprocessor pp(preprocessor_options_, diagnostics_engine_, lang_options_,
-      const_cast<clang::SourceManager&>(source_manager_),
-      const_cast<clang::HeaderSearch&>(header_search_),
-      const_cast<clang::TrivialModuleLoader&>(module_loader_),
-    /*IILookup=*/nullptr, /*OwnsHeaderSearch=*/false);
+  clang::Preprocessor& pp = translation_unit.get_pp();
 
   // --- 3. Attach Callbacks ---
   std::vector<PreprocessorEvent> pp_events;
@@ -77,19 +96,17 @@ void ClangFrontend::process_input_buffer(SourceFile const& source_file, Translat
   PrintSourceLocation print_source_location(source_manager_);
 #endif
 
-  do
+  for (;;)
   {
+    // --- Lex the next token ---
     pp.Lex(tok);
 
+    // Stop if we reached the end of the file.
     if (tok.is(clang::tok::eof))
       break;
 
     clang::SourceLocation CurrentLoc = tok.getLocation();
-    if (CurrentLoc.isInvalid())
-    {
-      Dout(dc::notice, "[Skipping token with invalid location: Kind " << tok.getKind() << "]");
-      continue;
-    }
+    Dout(dc::notice, "CurrentLoc = " << print_source_location(CurrentLoc));
 
     // --- Check if the token's EXPANSION location is in our main file ---
     if (!source_manager_.isInFileID(CurrentLoc, translation_unit.file_id()))
@@ -102,9 +119,16 @@ void ClangFrontend::process_input_buffer(SourceFile const& source_file, Translat
       std::string spelling = pp.getSpelling(tok);
 
       Dout(dc::notice, "Token(External): "
-             << " (Spelling: " << print_source_location(SpellingLoc) << ")"
              << ", Kind: " << tokenName << " (" << tok.getKind() << ")"
              << ", Text: '" << /* escaping needed */ spelling << "'");
+      clang::SourceLocation ExpansionLoc = source_manager_.getExpansionLoc(CurrentLoc);
+      Dout(dc::notice, "ExpansionLoc = " << print_source_location(ExpansionLoc));
+      Dout(dc::notice, "SpellingLoc = " << print_source_location(SpellingLoc));
+      if (!source_manager_.isInFileID(SpellingLoc, translation_unit.file_id()))
+      {
+        clang::SourceLocation SpellingLoc2 = source_manager_.getSpellingLoc(SpellingLoc);
+        Dout(dc::notice, "SpellingLoc2 = " << print_source_location(SpellingLoc2));
+      }
 
       continue; // Skip gap calculation for this token
     }
@@ -152,7 +176,9 @@ void ClangFrontend::process_input_buffer(SourceFile const& source_file, Translat
     // --- Update LastOffset to the position *after* this token IN THE FILE ---
     LastOffset = CurrentEndOffset;
 
-  } while (tok.isNot(clang::tok::eof));
+    // --- Add the token to the translation unit ---
+    translation_unit.add_input_token(tok, CurrentOffset, LengthInFile, ExpLine, ExpCol);
+  }
 
   // --- Process any remaining gap at the end of the file ---
   unsigned FileEndOffset = source_file.size();
