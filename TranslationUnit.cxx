@@ -1,18 +1,18 @@
 #include "sys.h"
-#include "ClangFrontend.h"
-#include "SourceFile.h"
 #include "TranslationUnit.h"
-#include "InputToken.h"
 #include "utils/AIAlert.h"
 #include <clang/Lex/Preprocessor.h>
+#include "ClangFrontend.h"
+#include "InputToken.h"
+#include "SourceFile.h"
 #ifdef CWDEBUG
-#include "debug_ostream_operators.h"
 #include <libcwd/buf2str.h>
+#include "debug_ostream_operators.h"
 #endif
 #include "debug.h"
 
 TranslationUnit::TranslationUnit(ClangFrontend& clang_frontend, SourceFile const& source_file COMMA_CWDEBUG_ONLY(std::string const& name)) :
-  clang_frontend_(clang_frontend), source_file_(source_file) COMMA_CWDEBUG_ONLY(name_(name))
+    clang_frontend_(clang_frontend), source_file_(source_file) COMMA_CWDEBUG_ONLY(name_(name))
 {
   clang_frontend_.begin_source_file(source_file, *this);
 }
@@ -34,11 +34,22 @@ void TranslationUnit::process(SourceFile const& source_file)
   clang_frontend_.process_input_buffer(source_file, *this);
 }
 
-void TranslationUnit::add_input_token(clang::SourceLocation current_location, clang::Token const& token, unsigned int current_offset, size_t token_length)
+clang::SourceManager const& TranslationUnit::source_manager() const
 {
-  PrintSourceLocation const print_source_location{clang_frontend_.source_manager()};
+  return clang_frontend_.source_manager();
+}
 
-  DoutEntering(dc::notice, "TranslationUnit::add_input_token(" << print_source_location(current_location) << ", token, " << current_offset << ", " << token_length << ")");
+void TranslationUnit::add_input_token(
+  clang::SourceLocation current_location, clang::Token const& token, unsigned int current_offset, size_t token_length)
+{
+#ifdef CWDEBUG
+  PrintSourceLocation const print_source_location{*this};
+  PrintToken const print_token{*this};
+#endif
+
+  DoutEntering(dc::notice,
+    "TranslationUnit::add_input_token(" << print_source_location(current_location) << ", " << print_token(token) << ", " << current_offset
+                                        << ", " << token_length << ")");
 
   auto token_view = source_file_.span(current_offset, token_length);
   Dout(dc::notice, "Token: \"" << buf2str(token_view) << "\"");
@@ -53,6 +64,12 @@ void TranslationUnit::add_input_token(clang::SourceLocation current_location, cl
     auto gap_text = source_file_.span(last_offset_, gap_length);
 
     Dout(dc::notice, "Gap : FileOffset: " << last_offset_ << ", Length: " << gap_length << ", Text: '" << buf2str(gap_text) << "'");
+
+    static std::string_view const whitespace(" \t\n");
+    // Check that the gap only contains whitespace.
+    auto pos = gap_text.find_first_not_of(whitespace);
+    // This gap contains a PPToken that should have been detected.
+    ASSERT(pos == std::string_view::npos);
   }
 
   // Create an InputToken.
@@ -71,7 +88,9 @@ void TranslationUnit::eof()
     size_t gap_length = end_offset - last_offset_;
     auto gap_text = source_file_.span(last_offset_, gap_length);
 
-    Dout(dc::notice, "End of File Gap: FileOffset: " << last_offset_ << ", Length: " << gap_length << ", Text: '" << buf2str(gap_text.data(), gap_text.size()) << "'");
+    Dout(dc::notice,
+      "End of File Gap: FileOffset: " << last_offset_ << ", Length: " << gap_length << ", Text: '" << buf2str(gap_text.data(), gap_text.size())
+                                      << "'");
   }
 }
 

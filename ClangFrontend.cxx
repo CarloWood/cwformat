@@ -1,11 +1,11 @@
 #include "sys.h"
 #include "ClangFrontend.h"
 #include "SourceFile.h"
-#include "libcwd/buf2str.h"
-#include "clang/Lex/Preprocessor.h"
+#include "PreprocessorEventsHandler.h"
 #include "utils/AIAlert.h"
-#include "MacroCallbackRecorder.h"
+#include "clang/Lex/Preprocessor.h"
 #ifdef CWDEBUG
+#include "libcwd/buf2str.h"
 #include "debug_ostream_operators.h"
 #endif
 
@@ -54,7 +54,7 @@ void ClangFrontend::process_input_buffer(SourceFile const& source_file, Translat
 
   // --- 3. Attach Callbacks ---
   std::vector<PreprocessorEvent> pp_events;
-  auto callback_recorder = std::make_unique<MacroCallbackRecorder>(pp, pp_events);
+  auto callback_recorder = std::make_unique<PreprocessorEventsHandler>(pp.getSourceManager(), translation_unit, pp_events);
   pp.addPPCallbacks(std::move(callback_recorder));
 
   // --- 4. Initialize Preprocessor & Configure ---
@@ -72,7 +72,7 @@ void ClangFrontend::process_input_buffer(SourceFile const& source_file, Translat
   clang::SourceLocation FileStartLoc = source_manager_.getLocForStartOfFile(translation_unit.file_id());
 
 #ifdef CWDEBUG
-  PrintSourceLocation print_source_location(source_manager_);
+  PrintSourceLocation print_source_location(translation_unit);
 #endif
 
   for (;;)
@@ -118,6 +118,7 @@ void ClangFrontend::process_input_buffer(SourceFile const& source_file, Translat
     translation_unit.add_input_token(current_location, tok, current_offset, token_length);
   }
   Dout(dc::notice, "--- End of Tokens and Whitespace ---");
+
   Dout(dc::notice, "--- Preprocessor Events ---");
   // ... (Output pp_events as before) ...
   for (auto const& event : pp_events)
