@@ -9,6 +9,8 @@
 #include "debug_ostream_operators.h"
 #endif
 
+#include "TranslationUnit.inl"
+
 ClangFrontend::ClangFrontend() :
     diagnostic_ids_(new clang::DiagnosticIDs), diagnostic_consumer_(llvm::errs(), diagnostic_options_.get()),
     diagnostics_engine_(diagnostic_ids_, diagnostic_options_, &diagnostic_consumer_, /*ShouldOwnClient=*/false),
@@ -54,12 +56,11 @@ void ClangFrontend::process_input_buffer(SourceFile const& source_file, Translat
 
   // --- 3. Attach Callbacks ---
   std::vector<PreprocessorEvent> pp_events;
-  auto callback_recorder = std::make_unique<PreprocessorEventsHandler>(pp.getSourceManager(), translation_unit, pp_events);
-  pp.addPPCallbacks(std::move(callback_recorder));
+  pp.addPPCallbacks(std::make_unique<PreprocessorEventsHandler>(pp.getSourceManager(), translation_unit));
 
   // --- 4. Initialize Preprocessor & Configure ---
   pp.Initialize(*target_info_);
-  pp.SetCommentRetentionState(true, true);
+//  pp.SetCommentRetentionState(true, true);
   pp.SetSuppressIncludeNotFoundError(true);
 
   // --- 5. Enter Main File ---
@@ -110,12 +111,8 @@ void ClangFrontend::process_input_buffer(SourceFile const& source_file, Translat
       continue; // Skip gap calculation for this token.
     }
 
-    // Token is in the main file.
-    unsigned int current_offset = source_manager_.getFileOffset(current_location);
-    size_t token_length = clang::Lexer::MeasureTokenLength(current_location, source_manager_, lang_options_);
-
-    // Add the token to the translation unit.
-    translation_unit.add_input_token(current_location, tok, current_offset, token_length);
+    // Token is in the main file; add the token to the translation unit.
+    translation_unit.add_input_token(current_location, tok);
   }
   Dout(dc::notice, "--- End of Tokens and Whitespace ---");
 

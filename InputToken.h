@@ -1,40 +1,56 @@
 #pragma once
 
-#include "clang/Basic/SourceManager.h"
 #include "clang/Basic/SourceLocation.h"
+#include "clang/Basic/SourceManager.h"
 #include "clang/Lex/Token.h"
-
-#include <variant>
 #include <optional>
 #include <string>
+#include <variant>
 
-// --- Placeholder for your custom PPToken ---
-// You will need to define this struct fully based on your needs.
-// It should contain information specific to preprocessor entities
-// that aren't standard clang::Tokens (like directives, escaped newlines, etc.)
+#ifdef CWDEBUG
+#include "utils/has_print_on.h"
+#endif
+
+#ifdef CWDEBUG
+using utils::has_print_on::operator<<;
+#endif
+
 struct PPToken
 {
-  // Example: Enum to classify the PP token type
-  enum class Kind {
-      EscapedNewline,
-      Directive, // e.g., #include, #ifdef, #define
-      MacroDefinition, // The full definition line(s)
-      MacroUsage,      // An invocation of a macro (might overlap with clang::Token::identifier?)
-      HeaderName,      // Content within <...> or "..." after #include
-      Pragma,
-      // ... other PP-specific kinds
-  } kind;
+  enum Kind
+  {
+    whitespace,
+    c_comment,
+    cxx_comment,
+    escaped_newline, // A "\\\n".
+    directive_hash,  // The '#' of directives.
+    directive,       // e.g., include, ifdef, ifndef, else, elif, endif, define, pragma ...
+//  macro_definition,// The full definition line(s)
+//  macro_usage,     // An invocation of a macro (might overlap with clang::Token::identifier?)
+    header_name,     // The <...> or "..." that follows an #include.
+    pragma,          // What follows a #pragma.
+    // ... other PP-specific kinds
+  } kind_;
 
-  // Example: Store additional data if needed, e.g., the directive name
-  std::string directiveName; // Only valid if kind == Kind::Directive
-  // ... other potential members like macro parameters, include path etc.
+  //  std::string content_; // Only valid if kind_ is Directive, HeaderName, Pragma.
 
   // Constructor example
-  PPToken(Kind k) : kind(k) {}
-  PPToken(Kind k, std::string name) : kind(k), directiveName(std::move(name)) {}
-  // ... other constructors
+  PPToken(Kind k) : kind_(k) {}
+  //  PPToken(Kind k, std::string content) : kind_(k), content_(std::move(content)) {}
+
+  inline char const* getTokenName(PPToken::Kind kind) const;
+
+#ifdef CWDEBUG
+  void print_on(std::ostream& os) const;
+#endif
 };
-// --- End Placeholder ---
+
+char const* to_string(PPToken::Kind kind);
+
+char const* PPToken::getTokenName(PPToken::Kind kind) const
+{
+  return to_string(kind);
+}
 
 //
 // InputToken
@@ -50,17 +66,10 @@ class InputToken
   using Payload = std::variant<clang::Token, PPToken>;
 
  private:
-  Payload payload_;                     // The actual data (Token or PPToken).
-  std::string_view input_sequence_;     // Start location and length of the input characters in the input buffer.
+  Payload payload_;                 // The actual data (Token or PPToken).
+  std::string_view input_sequence_; // Start location and length of the input characters in the input buffer.
 
  public:
-  InputToken(clang::Token const& token, std::string_view input_sequence) :
-    payload_(token), input_sequence_(input_sequence)
-  {
-  }
-
-  InputToken(PPToken const& preprocessor_token, std::string_view input_sequence) :
-    payload_(preprocessor_token), input_sequence_(input_sequence)
-  {
-  }
+  InputToken(clang::Token const& token, std::string_view input_sequence) : payload_(token), input_sequence_(input_sequence) { }
+  InputToken(PPToken const& preprocessor_token, std::string_view input_sequence) : payload_(preprocessor_token), input_sequence_(input_sequence) { }
 };

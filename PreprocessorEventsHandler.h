@@ -1,5 +1,7 @@
 #pragma once
 
+#include "TranslationUnitRef.h"
+#include "InputToken.h"
 #include <clang/Basic/SourceManager.h>
 #include <clang/Lex/MacroArgs.h>
 #include <clang/Lex/PPCallbacks.h>
@@ -31,23 +33,10 @@ struct PreprocessorEvent
   PreprocessorEvent(EventType T, std::string N, clang::SourceRange L) : Type(T), Name(std::move(N)), Location(L) {}
 };
 
-class PreprocessorEventsHandler : public clang::PPCallbacks
+class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationUnitRef
 {
- private:
-  TranslationUnit const& translation_unit_;
-  std::vector<PreprocessorEvent>& EventsOutput; // Store events here.
-#ifdef CWDEBUG
-  auto print_source_location(clang::SourceLocation loc) { return PrintSourceLocation{translation_unit_}(loc); }
-  auto print_source_range(clang::SourceRange const& range) { return PrintSourceRange{translation_unit_}(range); }
-  auto print_char_source_range(clang::CharSourceRange const& char_range) { return PrintCharSourceRange{translation_unit_}(char_range); }
-  auto print_token(clang::Token const& token) { return PrintToken{translation_unit_}(token); }
-#endif
-
  public:
-  PreprocessorEventsHandler(clang::SourceManager& source_manager, TranslationUnit const& translation_unit,
-    std::vector<PreprocessorEvent>& EventsOutputRef) : translation_unit_(translation_unit), EventsOutput(EventsOutputRef)
-  {
-  }
+  PreprocessorEventsHandler(clang::SourceManager& source_manager, TranslationUnit& translation_unit) : TranslationUnitRef(translation_unit) { }
 
   void InclusionDirective(clang::SourceLocation HashLoc, clang::Token const& IncludeTok, clang::StringRef FileName, bool IsAngled,
     clang::CharSourceRange FilenameRange, clang::OptionalFileEntryRef File, clang::StringRef SearchPath, clang::StringRef RelativePath,
@@ -58,20 +47,25 @@ class PreprocessorEventsHandler : public clang::PPCallbacks
                                                        << ", " << std::boolalpha << IsAngled << ", " << print_char_source_range(FilenameRange)
                                                        << ", " << File << ", " << SearchPath << ", " << RelativePath << ", " << SuggestedModule
                                                        << ", " << std::boolalpha << ModuleImported << ", " << FileType << ")");
+
+    translation_unit_.add_input_token<PPToken>(HashLoc, {PPToken::directive_hash});
+    translation_unit_.add_input_token<PPToken>(IncludeTok.getLocation(), {PPToken::directive});
+
+    clang::SourceManager const& source_manager = translation_unit_.source_manager();
+    unsigned int begin_offset = source_manager.getFileOffset(FilenameRange.getBegin());
+    unsigned int end_offset = source_manager.getFileOffset(FilenameRange.getEnd());
+    translation_unit_.add_input_token<PPToken>(begin_offset, end_offset - begin_offset, {PPToken::header_name});
   }
 
   // Called when a macro is defined (#define).
   void MacroDefined(clang::Token const& MacroNameTok, clang::MacroDirective const* MD) override
   {
-    if (!MD || !MD->getMacroInfo())
-      return; // Basic sanity check.
+    DoutEntering(dc::notice,
+        "PreprocessorEventsHandler::MacroDefined(" << print_token(MacroNameTok) << ", " << print_macro_directive(*MD) << ")");
 
     clang::SourceLocation begin = MD->getMacroInfo()->getDefinitionLoc();
     clang::SourceLocation end = MD->getMacroInfo()->getDefinitionEndLoc();
     clang::SourceRange DefRange(begin, end);
-
-    EventsOutput.emplace_back(PreprocessorEvent::MACRO_DEFINITION, MacroNameTok.getIdentifierInfo()->getName().str(), DefRange);
-    Dout(dc::notice, "Callback: Defined macro '" << print_token(MacroNameTok) << "' at " << print_source_range(DefRange));
   }
 
   // Called when a macro is invoked and about to be expanded.
@@ -79,7 +73,6 @@ class PreprocessorEventsHandler : public clang::PPCallbacks
     clang::Token const& MacroNameTok, clang::MacroDefinition const& MD, clang::SourceRange source_range, clang::MacroArgs const* Args) override
   {
     // source_range refers to the macro invocation in the source file.
-    EventsOutput.emplace_back(PreprocessorEvent::MACRO_EXPANSION, MacroNameTok.getIdentifierInfo()->getName().str(), source_range);
     Dout(dc::notice, "Callback: Expanding macro '" << print_token(MacroNameTok) << "' at " << print_source_range(source_range));
   }
 

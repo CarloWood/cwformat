@@ -1,6 +1,7 @@
 #pragma once
 
 #include "NoaContainer.h"
+#include "TranslationUnitRef.h"
 #include "clang/Basic/SourceLocation.h"
 #include "debug.h"
 #include <memory>
@@ -8,6 +9,7 @@
 // Forward declarations.
 class ClangFrontend;
 class SourceFile;
+struct PPToken;
 
 namespace clang {
 class Token;
@@ -15,7 +17,7 @@ class Preprocessor;
 class SourceManager;
 } // namespace clang
 
-class TranslationUnit : public NoaContainer
+class TranslationUnit : public NoaContainer COMMA_CWDEBUG_ONLY(public TranslationUnitRef)
 {
  private:
   ClangFrontend& clang_frontend_;
@@ -33,8 +35,17 @@ class TranslationUnit : public NoaContainer
   ~TranslationUnit();
 
   void process(SourceFile const& source_file);
-  void add_input_token(clang::SourceLocation current_location, clang::Token const& token, unsigned int current_offset, size_t token_length);
   void eof();
+
+  template<typename TOKEN>
+  requires std::is_same_v<TOKEN, clang::Token> || std::is_same_v<TOKEN, PPToken>
+  void add_input_token(clang::SourceLocation current_location, TOKEN const& token);
+
+  template<typename TOKEN>
+  requires std::is_same_v<TOKEN, clang::Token> || std::is_same_v<TOKEN, PPToken>
+  void add_input_token(unsigned int current_offset, size_t token_length, TOKEN const& token);
+
+  void process_gap(unsigned int current_offset);
 
   clang::SourceManager const& source_manager() const;
   SourceFile const& source_file() const { return source_file_; }

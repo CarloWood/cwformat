@@ -13,6 +13,7 @@
 #include "clang/Lex/HeaderSearchOptions.h"
 #include "clang/Lex/ModuleLoader.h"
 #include "clang/Lex/PreprocessorOptions.h"
+#include "clang/Lex/Lexer.h"
 #include "llvm/TargetParser/Host.h"
 #include <iostream>
 #include <memory>
@@ -176,6 +177,11 @@ class ClangFrontend : public OptionsBase
   void end_source_file();
 
   clang::SourceManager const& source_manager() const { return source_manager_; }
+
+  std::pair<unsigned int, size_t> measure_token_length(clang::SourceLocation location)
+  {
+    return {source_manager_.getFileOffset(location), clang::Lexer::MeasureTokenLength(location, source_manager_, lang_options_)};
+  }
 
   // Reads from input_buffer and writes to translation_unit.
   void process_input_buffer(SourceFile const& source_file, TranslationUnit& translation_unit) const;

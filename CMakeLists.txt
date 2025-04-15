@@ -32,7 +32,21 @@ message(STATUS "Using ClangConfig.cmake in: ${Clang_DIR} (found version \"${LLVM
 #find_package(LLVM REQUIRED CONFIG)
 #message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR} (found version \"${LLVM_PACKAGE_VERSION}\")")
 
-add_executable(cwformat cwformat.cxx SourceFile.cxx ClangFrontend.cxx DiagnosticConsumer.cxx SourceFile.cxx TranslationUnit.cxx NoaContainer.cxx debug_ostream_operators.cxx)
+add_executable(cwformat
+  cwformat.cxx
+  SourceFile.cxx
+  ClangFrontend.cxx
+  DiagnosticConsumer.cxx
+  SourceFile.cxx
+  TranslationUnit.cxx
+  NoaContainer.cxx
+  InputToken.cxx
+)
+
+if (OptionEnableLibcwd)
+  # These source files only contains debug code.
+  target_sources(cwformat PRIVATE TranslationUnitRef.cxx debug_ostream_operators.cxx)
+endif ()
 
 #target_compile_definitions(cwformat PRIVATE ${LLVM_DEFINITIONS})
 #target_include_directories(cwformat PRIVATE ${LLVM_INCLUDE_DIRS})
