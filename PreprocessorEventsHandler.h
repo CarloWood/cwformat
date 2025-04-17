@@ -106,12 +106,39 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
 
       for (unsigned int param = 0; param < number_of_parameters; ++param)
       {
-        char const* name = params[param]->getNameStart();
-        translation_unit_.add_input_token(name, {PPToken::function_macro_param});
-
-        // Not the last parameter?
-        if (param < number_of_parameters - 1)
+        if (param > 0)
           translation_unit_.add_input_token(",", {PPToken::function_macro_comma});
+
+        // If this is a C99 varargs macro, then the last argument has the `name` "__VAR_ARGS__".
+        if (param < number_of_parameters - 1 || !macro_info->isC99Varargs())
+        {
+          char const* name = params[param]->getNameStart();
+          translation_unit_.add_input_token(name, {PPToken::function_macro_param}); // TranslationUnit
+        }
+
+        // This is the last parameter?
+        if (param == number_of_parameters - 1 && macro_info->isVariadic())
+        {
+          // If macro_info->isGNUVarargs() is true then the last argument is directly followed by
+          // an ellipsis (without a comma), possibly separated by whitespace, e.g.
+          //
+          //   #define MyMacro(arg1, args ...)
+          //                         ^
+          //                       name
+          //
+          // and we have to add the ellipsis now, after the name that was just added.
+          //
+          // Otherwise this is a C99 variadic macro, where there must be a comma before the
+          // ellipsis and the last argument is just that ellipsis. Adding `name` was skipped
+          // because that equals the string "__VA_ARGS__".
+          //
+          //  #define MyMacro(arg1, arg2, ...)
+          //
+          // In this case we now have to add "..." instead of the name.
+          //
+          // Therefore, in both cases, add an ellipsis.
+          translation_unit_.add_input_token("...", {PPToken::function_macro_ellipsis});
+        }
       }
       // There must be a closing parenthesis.
       translation_unit_.add_input_token(")", {PPToken::function_macro_rparen});

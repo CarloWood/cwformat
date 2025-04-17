@@ -31,6 +31,7 @@ struct PPToken
     function_macro_rparen,      // The closing parenthesis of a function-like macro definition.
     function_macro_param,       // Function-like macro parameter identifier.
     function_macro_comma,       // Function-like macro parameter separator.
+    function_macro_ellipsis,    // The ... that is part of the parameter list of a function-like macro.
 //  macro_definition,   // The full definition line(s)
 //  macro_usage,        // An invocation of a macro (might overlap with clang::Token::identifier?)
     header_name,        // The <...> or "..." that follows an #include.
