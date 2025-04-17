@@ -2,14 +2,13 @@
 #include "ClangFrontend.h"
 #include "SourceFile.h"
 #include "PreprocessorEventsHandler.h"
+#include "TranslationUnit.h"
 #include "utils/AIAlert.h"
 #include "clang/Lex/Preprocessor.h"
 #ifdef CWDEBUG
 #include "libcwd/buf2str.h"
 #include "debug_ostream_operators.h"
 #endif
-
-#include "TranslationUnit.inl"
 
 ClangFrontend::ClangFrontend() :
     diagnostic_ids_(new clang::DiagnosticIDs), diagnostic_consumer_(llvm::errs(), diagnostic_options_.get()),
@@ -55,7 +54,6 @@ void ClangFrontend::process_input_buffer(SourceFile const& source_file, Translat
   clang::Preprocessor& pp = translation_unit.get_pp();
 
   // --- 3. Attach Callbacks ---
-  std::vector<PreprocessorEvent> pp_events;
   pp.addPPCallbacks(std::make_unique<PreprocessorEventsHandler>(pp.getSourceManager(), translation_unit));
 
   // --- 4. Initialize Preprocessor & Configure ---
@@ -115,16 +113,4 @@ void ClangFrontend::process_input_buffer(SourceFile const& source_file, Translat
     translation_unit.add_input_token(current_location, tok);
   }
   Dout(dc::notice, "--- End of Tokens and Whitespace ---");
-
-  Dout(dc::notice, "--- Preprocessor Events ---");
-  // ... (Output pp_events as before) ...
-  for (auto const& event : pp_events)
-  {
-    // Use Expansion loc for line/col as it's often more relevant for where it occurred.
-    unsigned int eventLine = source_manager_.getExpansionLineNumber(event.Location.getBegin());
-    unsigned int eventCol = source_manager_.getExpansionColumnNumber(event.Location.getBegin());
-    std::string typeStr = (event.Type == PreprocessorEvent::MACRO_DEFINITION) ? "DEFINITION" : "EXPANSION";
-    Dout(dc::notice, "Event: Type: " << typeStr << ", Name: '" << event.Name << "'" << ", Line: " << eventLine << ", Col: " << eventCol);
-  }
-  Dout(dc::notice, "--- End of Preprocessor Events ---");
 }

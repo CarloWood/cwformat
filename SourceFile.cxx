@@ -3,11 +3,6 @@
 #include <iterator>
 #include <sstream>
 
-char SourceFile::peek(SourceFile::iterator pos) const
-{
-  return pos[1];
-}
-
 std::string_view SourceFile::range(SourceFile::iterator first, SourceFile::iterator last) const
 {
   ASSERT(begin() <= first && first <= last && last <= end());

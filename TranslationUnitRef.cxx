@@ -92,13 +92,5 @@ void MacroDirective::print_on(std::ostream& os) const
   os << "<" << kind << ">, " << MacroInfo{translation_unit_, *macro_info} << " @ " << PrintSourceLocation{translation_unit_}(macro_directive_.getLocation());
 }
 
-void MacroInfo::print_on(std::ostream& os) const
-{
-  os << '{';
-  os << "[" << PrintSourceLocation{translation_unit_}(macro_info_.getDefinitionLoc()) << ", " <<
-    PrintSourceLocation{translation_unit_}(macro_info_.getDefinitionEndLoc()) << "]";
-  os << '}';
-}
-
 } // namespace debug
 #endif

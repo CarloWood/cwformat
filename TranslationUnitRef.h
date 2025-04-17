@@ -13,7 +13,6 @@ struct PPToken;
 
 namespace clang {
 class MacroDirective;
-class MacroInfo;
 } // namespace clang
 
 namespace debug {
@@ -55,14 +54,6 @@ struct MacroDirective
 {
   TranslationUnit const& translation_unit_;
   clang::MacroDirective const& macro_directive_;
-
-  void print_on(std::ostream& os) const;
-};
-
-struct MacroInfo
-{
-  TranslationUnit const& translation_unit_;
-  clang::MacroInfo const& macro_info_;
 
   void print_on(std::ostream& os) const;
 };
@@ -114,13 +105,14 @@ class PrintToken
 };
 #endif
 
-class TranslationUnitRef
+template<typename TUREF>
+class TranslationUnitRefImpl
 {
  protected:
-  TranslationUnit& translation_unit_;
+  TUREF translation_unit_;
 
  protected:
-  TranslationUnitRef(TranslationUnit& translation_unit) : translation_unit_(translation_unit) { }
+  TranslationUnitRefImpl(TUREF translation_unit) : translation_unit_(translation_unit) { }
 
 #ifdef CWDEBUG
  public:
@@ -133,3 +125,6 @@ class TranslationUnitRef
   PPToken const& print_token(PPToken const& token) const { return token; }
 #endif
 };
+
+using TranslationUnitRef      = TranslationUnitRefImpl<TranslationUnit&>;
+using TranslationUnitRefConst = TranslationUnitRefImpl<TranslationUnit const&>;

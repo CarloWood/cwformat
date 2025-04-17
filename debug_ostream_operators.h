@@ -1,5 +1,6 @@
 #pragma once
 
+#include "TranslationUnitRef.h"
 #include "utils/has_print_on.h"
 #include "libcwd/buf2str.h"
 #include <llvm/ADT/StringRef.h>
@@ -10,6 +11,35 @@
 #ifndef CWDEBUG
 #error "Only include debug_ostream_operators.h if CWDEBUG is defined."
 #endif
+
+namespace debug {
+using utils::has_print_on::operator<<;
+
+struct MacroInfo : public TranslationUnitRefConst
+{
+ private:
+  clang::MacroInfo const& macro_info_;
+
+ public:
+  MacroInfo(TranslationUnit const& translation_unit, clang::MacroInfo const& macro_info) :
+    TranslationUnitRefConst(translation_unit), macro_info_(macro_info) { }
+
+  void print_on(std::ostream& os) const;
+};
+
+struct IdentifierInfo : public TranslationUnitRefConst
+{
+ private:
+  clang::IdentifierInfo const& identifier_info_;
+
+ public:
+  IdentifierInfo(TranslationUnit const& translation_unit, clang::IdentifierInfo const& identifier_info) :
+    TranslationUnitRefConst(translation_unit), identifier_info_(identifier_info) { }
+
+  void print_on(std::ostream& os) const;
+};
+
+} // namespace debug
 
 namespace llvm {
 
@@ -27,6 +57,7 @@ class SourceManager;
 class SourceLocation;
 class SourceRange;
 class Token;
+class MacroInfo;
 
 namespace SrcMgr {
 

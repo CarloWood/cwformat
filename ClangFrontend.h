@@ -20,7 +20,9 @@
 #include <string>
 #include "DiagnosticConsumer.h"
 #include "SourceFile.h"
-#include "TranslationUnit.h"
+
+// Forward declaration.
+class TranslationUnit;
 
 struct DiagnosticOptions : clang::DiagnosticOptions
 {

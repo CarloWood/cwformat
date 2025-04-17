@@ -1,7 +1,7 @@
 #include "sys.h"
 
 #include "SourceFile.h"
-#include "ClangFrontend.h"
+#include "TranslationUnit.h"
 #include "utils/AIAlert.h"
 
 #include <cerrno>

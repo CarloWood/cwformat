@@ -2,6 +2,7 @@
 
 #include "TranslationUnitRef.h"
 #include "InputToken.h"
+#include "TranslationUnit.h"
 #include <clang/Basic/SourceManager.h>
 #include <clang/Lex/MacroArgs.h>
 #include <clang/Lex/PPCallbacks.h>
@@ -48,13 +49,15 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
                                                        << ", " << File << ", " << SearchPath << ", " << RelativePath << ", " << SuggestedModule
                                                        << ", " << std::boolalpha << ModuleImported << ", " << FileType << ")");
 
-    translation_unit_.add_input_token<PPToken>(HashLoc, {PPToken::directive_hash});
-    translation_unit_.add_input_token<PPToken>(IncludeTok.getLocation(), {PPToken::directive});
+    // I'd say this is trivially the case, for a filename.
+    ASSERT(FilenameRange.isCharRange());
 
-    clang::SourceManager const& source_manager = translation_unit_.source_manager();
-    unsigned int begin_offset = source_manager.getFileOffset(FilenameRange.getBegin());
-    unsigned int end_offset = source_manager.getFileOffset(FilenameRange.getEnd());
-    translation_unit_.add_input_token<PPToken>(begin_offset, end_offset - begin_offset, {PPToken::header_name});
+    // Add the directive hash.
+    translation_unit_.add_input_token<PPToken>(HashLoc, {PPToken::directive_hash});
+    // Add the include directive (including possible backslash-newlines in the middle).
+    translation_unit_.add_input_token<PPToken>(IncludeTok.getLocation(), {PPToken::directive});
+    // Add the header name directive; this includes the angle brackets or double quotes, as well as any backslash-newlines.
+    translation_unit_.add_input_token<PPToken>(FilenameRange.getAsRange(), {PPToken::header_name});
   }
 
   // Called when a macro is defined (#define).
@@ -63,9 +66,62 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
     DoutEntering(dc::notice,
         "PreprocessorEventsHandler::MacroDefined(" << print_token(MacroNameTok) << ", " << print_macro_directive(*MD) << ")");
 
-    clang::SourceLocation begin = MD->getMacroInfo()->getDefinitionLoc();
-    clang::SourceLocation end = MD->getMacroInfo()->getDefinitionEndLoc();
-    clang::SourceRange DefRange(begin, end);
+    using offset_type = TranslationUnit::offset_type;
+
+    // Get the position where the macroname begins:
+    //   #  define  macroname ( arg1,  arg2, ...)
+    //              ^
+    offset_type macro_name_offset = translation_unit_.source_manager().getFileOffset(MacroNameTok.getLocation());
+    // Get the position of the directive hash character:
+    //   #  define  macroname ( arg1,  arg2, ...)
+    //   ^ (has_length will be set to 1)
+    auto [hash_offset, hash_length] = translation_unit_.process_gap(macro_name_offset, "#");
+    // Add the directive hash.
+    translation_unit_.add_input_token<PPToken>(hash_offset, hash_length, {PPToken::directive_hash});
+
+    // Get the position of the `define` keyword:
+    //   # def\
+    //   ine  macroname
+    //     ^ (define_directive_length might be set to a value larger than 6 if there are backslash-newlines in the middle)
+    auto [define_directive_offset, define_directive_length] = translation_unit_.process_gap(macro_name_offset, "define");
+    // Add the define directive.
+    translation_unit_.add_input_token<PPToken>(define_directive_offset, define_directive_length, {PPToken::directive});
+
+    // Get the data related to this macro definition.
+    clang::MacroInfo const* macro_info = MD->getMacroInfo();
+
+    // Add the macro name.
+    bool is_function_like = macro_info->isFunctionLike();
+    translation_unit_.add_input_token<PPToken>(MacroNameTok.getLocation(), {is_function_like ? PPToken::function_macro_name : PPToken::macro_name});
+
+    // Get the position of the opening parenthesis if any.
+    if (is_function_like)
+    {
+      // Add the opening parenthesis. This must immediately follow the macro name.
+      translation_unit_.append_input_token(1, {PPToken::function_macro_lparen});
+      offset_type const end_offset = translation_unit_.source_manager().getFileOffset(macro_info->getDefinitionEndLoc());
+
+      unsigned int number_of_parameters = macro_info->getNumParams();
+      clang::ArrayRef<clang::IdentifierInfo const*> params = macro_info->params();
+
+      for (unsigned int param = 0; param < number_of_parameters; ++param)
+      {
+        char const* name = params[param]->getNameStart();
+        translation_unit_.add_input_token(name, {PPToken::function_macro_param});
+
+        // Not the last parameter?
+        if (param < number_of_parameters - 1)
+          translation_unit_.add_input_token(",", {PPToken::function_macro_comma});
+      }
+      // There must be a closing parenthesis.
+      translation_unit_.add_input_token(")", {PPToken::function_macro_rparen});
+    }
+
+    // Add all replacement tokens.
+    for (clang::MacroInfo::const_tokens_iterator token = macro_info->tokens_begin(); token != macro_info->tokens_end(); ++token)
+      translation_unit_.add_input_token(token->getLocation(), *token);
+
+    //clang::SourceRange macro_name{MD->getMacroInfo()->getDefinitionLoc(), MD->getMacroInfo()->getDefinitionEndLoc()};
   }
 
   // Called when a macro is invoked and about to be expanded.

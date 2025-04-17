@@ -14,6 +14,12 @@ char const* to_string(PPToken::Kind kind)
      AI_CASE_RETURN(escaped_newline);
      AI_CASE_RETURN(directive_hash);
      AI_CASE_RETURN(directive);
+     AI_CASE_RETURN(macro_name);
+     AI_CASE_RETURN(function_macro_name);
+     AI_CASE_RETURN(function_macro_lparen);
+     AI_CASE_RETURN(function_macro_rparen);
+     AI_CASE_RETURN(function_macro_param);
+     AI_CASE_RETURN(function_macro_comma);
 //     AI_CASE_RETURN(macro_definition);
 //     AI_CASE_RETURN(macro_usage);
      AI_CASE_RETURN(header_name);

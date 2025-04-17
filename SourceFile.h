@@ -31,7 +31,6 @@ class SourceFile
     return position;
   }
 
-  char peek(iterator pos) const;
   std::string_view range(iterator first, iterator last) const;
   std::string_view span(SourceFile::iterator first, size_t size) const;
   std::string_view span(unsigned int offset, size_t size) const;
