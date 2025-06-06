@@ -55,7 +55,7 @@ class TranslationUnit : public NoaContainer COMMA_CWDEBUG_ONLY(public Translatio
 
   template<typename TOKEN>
   requires std::is_same_v<TOKEN, clang::Token> || std::is_same_v<TOKEN, PPToken>
-  void add_input_token(offset_type token_offset, size_t token_length, TOKEN const& token);
+  void add_input_token(offset_type token_offset, size_t token_length, TOKEN const& token, bool ProcessGap = true);
 
   // Append a token without allowing whitespace (except backslash-newlines).
   void append_input_token(size_t token_length, PPToken const& token);
@@ -113,7 +113,7 @@ void TranslationUnit::add_input_token(clang::SourceRange token_range, TOKEN cons
 
 template<typename TOKEN>
 requires std::is_same_v<TOKEN, clang::Token> || std::is_same_v<TOKEN, PPToken>
-void TranslationUnit::add_input_token(offset_type token_offset, size_t token_length, TOKEN const& token)
+void TranslationUnit::add_input_token(offset_type token_offset, size_t token_length, TOKEN const& token, bool ProcessGap)
 {
   DoutEntering(dc::notice,
     "TranslationUnit::add_input_token(" << token_offset << ", " << token_length << ", " << print_token(token) << ")");
@@ -122,13 +122,15 @@ void TranslationUnit::add_input_token(offset_type token_offset, size_t token_len
   ASSERT(token_offset >= last_offset_);
 
   auto token_view = source_file_.span(token_offset, token_length);
-  Dout(dc::notice, "New token to add: \"" << buf2str(token_view) << "\".");
 
-  // Process the characters that were skipped (whitespace and comments- plus optional backslash-newlines).
-  process_gap(token_offset);
+  if (ProcessGap)
+  {
+    // Process the characters that were skipped (whitespace and comments- plus optional backslash-newlines).
+    process_gap(token_offset);
+  }
 
   // Create an InputToken.
-  Dout(dc::notice, "Adding " << print_token(token) << " \"" << buf2str(token_view) << "\".");
+  Dout(dc::notice, "Adding " << print_token(token) << " `" << buf2str(token_view) << "`.");
   InputToken input_token(token, token_view);
 
   // Update last_offset to the position after the current token.

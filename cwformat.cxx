@@ -48,6 +48,10 @@ cl::opt<std::string> files_list_file(
 
 cl::opt<bool> in_place("i", cl::desc("Inplace edit <file>s, if specified"), cl::cat(cwformat_category));
 
+cl::list<std::string> include_directories("I",
+    cl::desc("Add the directory <dir> to the list of directories to be searched for header files during preprocessing."),
+    cl::value_desc("dir"), cl::cat(cwformat_category));
+
 // Override the default --version behavior.
 static void print_version(llvm::raw_ostream& ros)
 {
@@ -239,8 +243,16 @@ int main(int argc, char* argv[])
   else if (in_place)
     llvm::outs() << "Files will be edited in-place\n";
 
+  auto configure_header_search_options = [](HeaderSearchOptions& header_search_options){
+    for (std::string const& dir : include_directories)
+    {
+      Dout(dc::notice, "Adding include directory \"" << dir << "\".");
+      header_search_options.AddPath(dir, clang::frontend::Angled, false, false);
+    }
+  };
+
   // Create a ClangFrontend instance.
-  ClangFrontend clang_frontend;
+  ClangFrontend clang_frontend(configure_header_search_options);
   // Needed for temporary file name generation.
   RandomNumber rn;
 
@@ -294,6 +306,10 @@ void process_filename(ClangFrontend& clang_frontend, RandomNumber& rn, std::file
   std::string input_filename_str = use_cin ? "<stdin>" : filename.native();
   std::string stdin_content_holder; // Must outlive input_buffer if getMemBuffer is used.
 
+  std::filesystem::path full_path;
+  if (!use_cin)
+    full_path = std::filesystem::absolute(filename);
+
   // --- 1. Acquire Input Buffer ---
   std::unique_ptr<llvm::MemoryBuffer> input_buffer;
 
@@ -303,7 +319,7 @@ void process_filename(ClangFrontend& clang_frontend, RandomNumber& rn, std::file
     stdin_content_holder.assign((std::istreambuf_iterator<char>(std::cin)), (std::istreambuf_iterator<char>()));
 
     if (std::cin.bad())
-      THROW_LALERT("Error reading from std::cin"); 
+      THROW_LALERT("Error reading from std::cin");
 
     // Create a MemoryBuffer *referencing* the string's data. No copy.
     // 'stdin_content_holder' MUST outlive the use of 'input_buffer'.
@@ -339,7 +355,7 @@ void process_filename(ClangFrontend& clang_frontend, RandomNumber& rn, std::file
   }
 
   // Create a SourceFile object from the input buffer.
-  SourceFile const source_file(input_filename_str, std::move(input_buffer));
+  SourceFile const source_file(input_filename_str, full_path, std::move(input_buffer));
   // Create a TranslationUnit object to hold the result.
   TranslationUnit translation_unit(clang_frontend, source_file COMMA_CWDEBUG_ONLY(input_filename_str));
 

@@ -18,6 +18,14 @@ class MacroDirective;
 namespace debug {
 using utils::has_print_on::operator<<;
 
+struct FileID
+{
+  TranslationUnit const& translation_unit_;
+  clang::FileID file_id_;
+
+  void print_on(std::ostream& os) const;
+};
+
 struct SourceLocation
 {
   TranslationUnit const& translation_unit_;
@@ -116,6 +124,7 @@ class TranslationUnitRefImpl
 
 #ifdef CWDEBUG
  public:
+  debug::FileID print_file_id(clang::FileID file_id) const { return {translation_unit_, file_id}; }
   debug::SourceLocation print_source_location(clang::SourceLocation loc) const { return {translation_unit_, loc}; }
   debug::SourceRange print_source_range(clang::SourceRange const& range) const { return {translation_unit_, range}; }
   debug::CharSourceRange print_char_source_range(clang::CharSourceRange const& char_range) const { return {translation_unit_, char_range}; }

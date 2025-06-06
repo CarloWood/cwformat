@@ -6,6 +6,7 @@
 #include <llvm/ADT/StringRef.h>
 #include <clang/Basic/SourceManager.h>
 #include <clang/Lex/MacroInfo.h>
+#include <clang/Lex/PPCallbacks.h>
 #include <iostream>
 
 #ifndef CWDEBUG
@@ -84,6 +85,20 @@ char const* to_string(MacroDirective::Kind macro_directive_kind);
 inline std::ostream& operator<<(std::ostream& os, MacroDirective::Kind macro_directive_kind)
 {
   return os << to_string(macro_directive_kind);
+}
+
+char const* to_string(PPCallbacks::FileChangeReason file_change_reason);
+
+inline std::ostream& operator<<(std::ostream& os, PPCallbacks::FileChangeReason file_change_reason)
+{
+  return os << to_string(file_change_reason);
+}
+
+char const* to_string(PPCallbacks::LexedFileChangeReason lexed_file_change_reason);
+
+inline std::ostream& operator<<(std::ostream& os, PPCallbacks::LexedFileChangeReason lexed_file_change_reason)
+{
+  return os << to_string(lexed_file_change_reason);
 }
 
 } // namespace clang

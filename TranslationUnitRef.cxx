@@ -12,6 +12,37 @@
 #ifdef CWDEBUG
 namespace debug {
 
+void FileID::print_on(std::ostream& os) const
+{
+  if (!file_id_.isValid())
+  {
+    os << "<invalid FileID>";
+    return;
+  }
+
+  clang::SourceManager const& source_manager = translation_unit_.source_manager();
+
+  bool is_invalid = false;
+  clang::SrcMgr::SLocEntry const& slocEntry = source_manager.getSLocEntry(file_id_, &is_invalid);
+  if (is_invalid)
+  {
+    os << "<getSLocEntry invalid:" << file_id_.getHashValue() << ">";
+    return;
+  }
+
+  if (slocEntry.isFile())
+  {
+    clang::SrcMgr::FileInfo const& file_info = slocEntry.getFile();
+    // file_info.getName() returns an llvm::StringRef.
+    os << static_cast<std::string_view>(file_info.getName());
+  }
+  else // slocEntry.isExpansion()
+  {
+    clang::SrcMgr::ExpansionInfo const& expansion_info = slocEntry.getExpansion();
+    os << "<macro expansion:" << file_id_.getHashValue() << " @ " << PrintSourceLocation{translation_unit_}(expansion_info.getSpellingLoc()) << '>';
+  }
+}
+
 void SourceLocation::print_on(std::ostream& os) const
 {
   if (location_.isInvalid())
@@ -28,7 +59,8 @@ void SourceLocation::print_on(std::ostream& os) const
     std::pair<clang::FileID, unsigned int> location = source_manager.getDecomposedLoc(location_);
     unsigned int line = source_manager.getLineNumber(location.first, location.second);
     unsigned int column = source_manager.getColumnNumber(location.first, location.second);
-    os << line << ":" << column;
+    FileID file_id{translation_unit_, location.first};
+    os << file_id << ':' << line << ':' << column;
   }
 }
 

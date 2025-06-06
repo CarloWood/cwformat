@@ -61,7 +61,7 @@ void TranslationUnit::append_input_token(size_t token_length, PPToken const& tok
     "TranslationUnit::append_input_token(" << token_length << ", " << print_token(token) << ")");
 
   // We are appending directly after the last token.
-  offset_type token_offset = last_offset_;
+  offset_type const token_offset = last_offset_;
 
   // However, backslash-newlines are always allowed. Include any with this token.
   auto current = source_file_.at(last_offset_);
@@ -80,15 +80,7 @@ void TranslationUnit::append_input_token(size_t token_length, PPToken const& tok
     }
   }
 
-  auto token_view = source_file_.span(token_offset, token_length);
-  Dout(dc::notice, "New token to add: \"" << buf2str(token_view) << "\".");
-
-  // Create an InputToken.
-  Dout(dc::notice, "Adding " << print_token(token) << " \"" << buf2str(token_view) << "\".");
-  InputToken input_token(token, token_view);
-
-  // Update last_offset to the position after the appended token.
-  last_offset_ += token_length;
+  add_input_token(last_offset_, token_length, token, false);
 }
 
 // Finds all whitespace, C-comment and C++-comment character sequences (all possibly having backslash-newlines inserted)

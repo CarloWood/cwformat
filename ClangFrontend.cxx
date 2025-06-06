@@ -10,8 +10,9 @@
 #include "debug_ostream_operators.h"
 #endif
 
-ClangFrontend::ClangFrontend() :
-    diagnostic_ids_(new clang::DiagnosticIDs), diagnostic_consumer_(llvm::errs(), diagnostic_options_.get()),
+ClangFrontend::ClangFrontend(configure_header_search_options_type configure_header_search_options) :
+    OptionsBase(std::move(configure_header_search_options)),
+    diagnostic_consumer_(llvm::errs(), diagnostic_options_.get()), diagnostic_ids_(new clang::DiagnosticIDs),
     diagnostics_engine_(diagnostic_ids_, diagnostic_options_, &diagnostic_consumer_, /*ShouldOwnClient=*/false),
     target_info_(ClangFrontend::create_target_info(diagnostics_engine_, target_options_)), file_manager_(file_system_options_),
     source_manager_(diagnostics_engine_, file_manager_),
@@ -21,7 +22,19 @@ ClangFrontend::ClangFrontend() :
 
 void ClangFrontend::begin_source_file(SourceFile const& source_file, TranslationUnit& translation_unit)
 {
-  clang::FileID file_id = source_manager_.createFileID(source_file.get_memory_buffer_ref());
+  clang::FileID file_id;
+
+  if (!source_file.full_path().empty())
+  {
+    clang::Expected<clang::FileEntryRef> fileEntryRefOrErr = file_manager_.getFileRef(source_file.full_path().native());
+    ASSERT(fileEntryRefOrErr);
+    clang::FileEntryRef fileEntryRef = *fileEntryRefOrErr;
+    file_id = source_manager_.createFileID(fileEntryRef, clang::SourceLocation(), clang::SrcMgr::C_User);
+    if (file_id.isValid())
+      source_manager_.overrideFileContents(fileEntryRef, source_file.get_memory_buffer_ref());
+  }
+  else
+    file_id = source_manager_.createFileID(source_file.get_memory_buffer_ref());
   if (file_id.isInvalid())
     THROW_LALERT("Unable to create FileID for input buffer: [FILENAME]", AIArgs("[FILENAME]", source_file.filename()));
   source_manager_.setMainFileID(file_id);
@@ -54,12 +67,12 @@ void ClangFrontend::process_input_buffer(SourceFile const& source_file, Translat
   clang::Preprocessor& pp = translation_unit.get_pp();
 
   // --- 3. Attach Callbacks ---
-  pp.addPPCallbacks(std::make_unique<PreprocessorEventsHandler>(pp.getSourceManager(), translation_unit));
+  pp.addPPCallbacks(std::make_unique<PreprocessorEventsHandler>(translation_unit));
 
   // --- 4. Initialize Preprocessor & Configure ---
   pp.Initialize(*target_info_);
 //  pp.SetCommentRetentionState(true, true);
-  pp.SetSuppressIncludeNotFoundError(true);
+  pp.SetSuppressIncludeNotFoundError(false);
 
   // --- 5. Enter Main File ---
   pp.EnterMainSourceFile();

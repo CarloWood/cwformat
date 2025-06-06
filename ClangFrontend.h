@@ -113,10 +113,12 @@ struct HeaderSearchOptions : public clang::HeaderSearchOptions
 {
   HeaderSearchOptions()
   {
-    UseBuiltinIncludes = false;
-    UseStandardSystemIncludes = false;
-    // Configure HeaderSearchOptions (if needed).
-    //AddPath("/usr/include", clang::frontend::Angled, false, false);
+    UseBuiltinIncludes = true;
+    UseStandardSystemIncludes = true;
+//    AddPath("/usr/include", clang::frontend::Angled, false, false);
+    Verbose = true;
+
+    ResourceDir = "/usr/lib/clang/19";
   }
 };
 
@@ -142,6 +144,9 @@ struct TargetOptions : public clang::TargetOptions
 
 class OptionsBase
 {
+ public:
+  using configure_header_search_options_type = std::function<void(HeaderSearchOptions&)>;
+
  protected:
   llvm::IntrusiveRefCntPtr<DiagnosticOptions> diagnostic_options_{new DiagnosticOptions};
   FileSystemOptions file_system_options_;
@@ -150,6 +155,11 @@ class OptionsBase
   //std::shared_ptr<clang::HeaderSearchOptions> header_search_options_{std::make_shared<HeaderSearchOptions>()};
   std::shared_ptr<clang::PreprocessorOptions> preprocessor_options_{std::make_shared<PreprocessorOptions>()};
   std::shared_ptr<clang::TargetOptions> target_options_{std::make_shared<TargetOptions>()};
+
+  OptionsBase(configure_header_search_options_type configure_header_search_options)
+  {
+    configure_header_search_options(header_search_options_);
+  }
 };
 
 class ClangFrontend : public OptionsBase
@@ -173,7 +183,7 @@ class ClangFrontend : public OptionsBase
   clang::TrivialModuleLoader module_loader_;
 
  public:
-  ClangFrontend();
+  ClangFrontend(configure_header_search_options_type configure_header_search_options = nullptr);
 
   void begin_source_file(SourceFile const& source_file, TranslationUnit& translation_unit);
   void end_source_file();

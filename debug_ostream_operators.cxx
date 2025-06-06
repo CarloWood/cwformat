@@ -41,6 +41,30 @@ char const* to_string(MacroDirective::Kind macro_directive_kind)
   AI_NEVER_REACHED
 }
 
+char const* to_string(PPCallbacks::FileChangeReason file_change_reason)
+{
+  using enum PPCallbacks::FileChangeReason;
+  switch (file_change_reason)
+  {
+    AI_CASE_RETURN(EnterFile);
+    AI_CASE_RETURN(ExitFile);
+    AI_CASE_RETURN(SystemHeaderPragma);
+    AI_CASE_RETURN(RenameFile);
+  }
+  AI_NEVER_REACHED
+}
+
+char const* to_string(PPCallbacks::LexedFileChangeReason lexed_file_change_reason)
+{
+  using enum PPCallbacks::LexedFileChangeReason;
+  switch (lexed_file_change_reason)
+  {
+    AI_CASE_RETURN(EnterFile);
+    AI_CASE_RETURN(ExitFile);
+  }
+  AI_NEVER_REACHED
+}
+
 } // namespace clang
 
 namespace debug {
