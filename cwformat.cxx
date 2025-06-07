@@ -53,7 +53,7 @@ cl::list<std::string> include_directories("I",
     cl::desc("Add the directory <dir> to the list of directories to be searched for header files during preprocessing."),
     cl::value_desc("dir"), cl::cat(cwformat_category));
 
-cl::list<std::string> commandline_macros("D",
+cl::list<std::string> commandline_macros_define("D",
     cl::desc("Define a macro using -D<name> or -D<name>=<value> during preprocessing."),
     cl::value_desc("name[=value]"),
     cl::ValueRequired,          // Require a value after -D.
@@ -267,15 +267,24 @@ int main(int argc, char* argv[])
   };
 
   auto configure_commandline_macro_definitions = [](clang::PreprocessorOptions& preprocessor_options){
-    for (std::string const& macro_definition : commandline_macros)
+    using position_to_type_map_type = std::map<unsigned, std::pair<char, std::string>>;
+    position_to_type_map_type position_to_type_map;
+    for (unsigned i = 0; i < commandline_macros_define.getNumOccurrences(); ++i)
+      position_to_type_map.emplace(commandline_macros_define.getPosition(i), position_to_type_map_type::mapped_type{'D', commandline_macros_define[i]});
+    for (unsigned i = 0; i < commandline_macros_undef.getNumOccurrences(); ++i)
+      position_to_type_map.emplace(commandline_macros_undef.getPosition(i), position_to_type_map_type::mapped_type{'U', commandline_macros_undef[i]});
+    for (auto&& p : position_to_type_map)
     {
-      Dout(dc::notice, "Adding macro definition \"" << macro_definition << "\"");
-      preprocessor_options.addMacroDef(macro_definition);
-    }
-    for (std::string const& macro_definition : commandline_macros_undef)
-    {
-      Dout(dc::notice, "Undefining macro \"" << macro_definition << "\"");
-      preprocessor_options.addMacroUndef(macro_definition);
+      if (p.second.first == 'D')
+      {
+        Dout(dc::notice, "Adding macro definition \"" << p.second.second << "\"");
+        preprocessor_options.addMacroDef(p.second.second);
+      }
+      else
+      {
+        Dout(dc::notice, "Undefining macro \"" << p.second.second << "\"");
+        preprocessor_options.addMacroUndef(p.second.second);
+      }
     }
   };
 
