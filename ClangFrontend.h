@@ -9,10 +9,12 @@
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Basic/TargetOptions.h"
 #include "clang/Frontend/TextDiagnosticPrinter.h"
+#include "clang/Frontend/FrontendOptions.h"
 #include "clang/Lex/HeaderSearch.h"
 #include "clang/Lex/HeaderSearchOptions.h"
 #include "clang/Lex/ModuleLoader.h"
 #include "clang/Lex/PreprocessorOptions.h"
+#include "clang/Lex/Preprocessor.h"
 #include "clang/Lex/Lexer.h"
 #include "llvm/TargetParser/Host.h"
 #include <iostream>
@@ -21,8 +23,9 @@
 #include "DiagnosticConsumer.h"
 #include "SourceFile.h"
 
-// Forward declaration.
+// Forward declarations.
 class TranslationUnit;
+namespace clang { class PCHContainerReader; }
 
 struct DiagnosticOptions : clang::DiagnosticOptions
 {
@@ -126,7 +129,7 @@ struct PreprocessorOptions : public clang::PreprocessorOptions
 {
   PreprocessorOptions()
   {
-    UsePredefines = false; // Do not load builtin definitions/macros.
+    UsePredefines = true; //false; // Do not load builtin definitions/macros.
     // Example options:
     //AddMacroDef("NDEBUG");
   }
@@ -142,6 +145,14 @@ struct TargetOptions : public clang::TargetOptions
   }
 };
 
+struct FrontendOptions : public clang::FrontendOptions
+{
+};
+
+struct CodeGenOptions : public clang::CodeGenOptions
+{
+};
+
 class OptionsBase
 {
  public:
@@ -155,6 +166,9 @@ class OptionsBase
   //std::shared_ptr<clang::HeaderSearchOptions> header_search_options_{std::make_shared<HeaderSearchOptions>()};
   std::shared_ptr<clang::PreprocessorOptions> preprocessor_options_{std::make_shared<PreprocessorOptions>()};
   std::shared_ptr<clang::TargetOptions> target_options_{std::make_shared<TargetOptions>()};
+  FrontendOptions frontend_options_;
+  clang::PCHContainerReader* pch_container_reader_ptr_ = nullptr;
+  CodeGenOptions code_gen_options_;
 
   OptionsBase(configure_header_search_options_type configure_header_search_options)
   {

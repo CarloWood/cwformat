@@ -5,6 +5,9 @@
 #include "TranslationUnit.h"
 #include "utils/AIAlert.h"
 #include "clang/Lex/Preprocessor.h"
+#include "clang/Lex/HeaderSearch.h"
+#include "clang/Serialization/PCHContainerOperations.h"
+#include "clang/Frontend/Utils.h"
 #ifdef CWDEBUG
 #include "libcwd/buf2str.h"
 #include "debug_ostream_operators.h"
@@ -18,6 +21,8 @@ ClangFrontend::ClangFrontend(configure_header_search_options_type configure_head
     source_manager_(diagnostics_engine_, file_manager_),
     header_search_(header_search_options_, source_manager_, diagnostics_engine_, lang_options_, target_info_.get())
 {
+  target_info_->adjust(diagnostics_engine_, lang_options_);
+  clang::ApplyHeaderSearchOptions(header_search_, header_search_options_, lang_options_, target_info_->getTriple());
 }
 
 void ClangFrontend::begin_source_file(SourceFile const& source_file, TranslationUnit& translation_unit)
@@ -40,7 +45,7 @@ void ClangFrontend::begin_source_file(SourceFile const& source_file, Translation
   source_manager_.setMainFileID(file_id);
 
   auto preprocessor = std::make_unique<clang::Preprocessor>(preprocessor_options_, diagnostics_engine_, lang_options_,
-      source_manager_, header_search_, module_loader_, /*IILookup=*/nullptr, /*OwnsHeaderSearch=*/false);
+      source_manager_, header_search_, module_loader_, /*IILookup=*/nullptr, /*OwnsHeaderSearch=*/false, clang::TU_Complete);
 
   diagnostic_consumer_.BeginSourceFile(lang_options_, preprocessor.get());
 
@@ -71,6 +76,8 @@ void ClangFrontend::process_input_buffer(SourceFile const& source_file, Translat
 
   // --- 4. Initialize Preprocessor & Configure ---
   pp.Initialize(*target_info_);
+  clang::InitializePreprocessor(pp, *preprocessor_options_, *pch_container_reader_ptr_, frontend_options_, code_gen_options_);
+
 //  pp.SetCommentRetentionState(true, true);
   pp.SetSuppressIncludeNotFoundError(false);
 
