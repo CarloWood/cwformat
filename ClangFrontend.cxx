@@ -13,8 +13,9 @@
 #include "debug_ostream_operators.h"
 #endif
 
-ClangFrontend::ClangFrontend(configure_header_search_options_type configure_header_search_options) :
-    OptionsBase(std::move(configure_header_search_options)),
+ClangFrontend::ClangFrontend(configure_header_search_options_type configure_header_search_options,
+      configure_commandline_macro_definitions_type configure_commandline_macro_definitions) :
+    OptionsBase(std::move(configure_header_search_options), std::move(configure_commandline_macro_definitions)),
     diagnostic_consumer_(llvm::errs(), diagnostic_options_.get()), diagnostic_ids_(new clang::DiagnosticIDs),
     diagnostics_engine_(diagnostic_ids_, diagnostic_options_, &diagnostic_consumer_, /*ShouldOwnClient=*/false),
     target_info_(ClangFrontend::create_target_info(diagnostics_engine_, target_options_)), file_manager_(file_system_options_),

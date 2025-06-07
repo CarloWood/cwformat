@@ -157,6 +157,7 @@ class OptionsBase
 {
  public:
   using configure_header_search_options_type = std::function<void(HeaderSearchOptions&)>;
+  using configure_commandline_macro_definitions_type = std::function<void(clang::PreprocessorOptions&)>;
 
  protected:
   llvm::IntrusiveRefCntPtr<DiagnosticOptions> diagnostic_options_{new DiagnosticOptions};
@@ -170,9 +171,10 @@ class OptionsBase
   clang::PCHContainerReader* pch_container_reader_ptr_ = nullptr;
   CodeGenOptions code_gen_options_;
 
-  OptionsBase(configure_header_search_options_type configure_header_search_options)
+  OptionsBase(configure_header_search_options_type configure_header_search_options, configure_commandline_macro_definitions_type configure_commandline_macro_definitions)
   {
     configure_header_search_options(header_search_options_);
+    configure_commandline_macro_definitions(*preprocessor_options_);
   }
 };
 
@@ -197,7 +199,7 @@ class ClangFrontend : public OptionsBase
   clang::TrivialModuleLoader module_loader_;
 
  public:
-  ClangFrontend(configure_header_search_options_type configure_header_search_options = nullptr);
+  ClangFrontend(configure_header_search_options_type configure_header_search_options, configure_commandline_macro_definitions_type configure_commandline_macro_definitions);
 
   void begin_source_file(SourceFile const& source_file, TranslationUnit& translation_unit);
   void end_source_file();

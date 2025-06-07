@@ -27,6 +27,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <utility>
 
 namespace cl = llvm::cl;
 
@@ -51,6 +52,20 @@ cl::opt<bool> in_place("i", cl::desc("Inplace edit <file>s, if specified"), cl::
 cl::list<std::string> include_directories("I",
     cl::desc("Add the directory <dir> to the list of directories to be searched for header files during preprocessing."),
     cl::value_desc("dir"), cl::cat(cwformat_category));
+
+cl::list<std::string> commandline_macros("D",
+    cl::desc("Define a macro using -D<name> or -D<name>=<value> during preprocessing."),
+    cl::value_desc("name[=value]"),
+    cl::ValueRequired,          // Require a value after -D.
+    cl::Prefix,                 // Allow the value to be attached to the option (e.g., -DFOO).
+    cl::cat(cwformat_category));
+
+cl::list<std::string> commandline_macros_undef("U",
+    cl::desc("Undefine a macro using -U<name> during preprocessing."),
+    cl::value_desc("name"),
+    cl::ValueRequired,          // Require a value after -U.
+    cl::Prefix,                 // Allow the value to be attached to the option (e.g., -UFOO).
+    cl::cat(cwformat_category));
 
 // Override the default --version behavior.
 static void print_version(llvm::raw_ostream& ros)
@@ -251,8 +266,21 @@ int main(int argc, char* argv[])
     }
   };
 
+  auto configure_commandline_macro_definitions = [](clang::PreprocessorOptions& preprocessor_options){
+    for (std::string const& macro_definition : commandline_macros)
+    {
+      Dout(dc::notice, "Adding macro definition \"" << macro_definition << "\"");
+      preprocessor_options.addMacroDef(macro_definition);
+    }
+    for (std::string const& macro_definition : commandline_macros_undef)
+    {
+      Dout(dc::notice, "Undefining macro \"" << macro_definition << "\"");
+      preprocessor_options.addMacroUndef(macro_definition);
+    }
+  };
+
   // Create a ClangFrontend instance.
-  ClangFrontend clang_frontend(configure_header_search_options);
+  ClangFrontend clang_frontend(configure_header_search_options, configure_commandline_macro_definitions);
   // Needed for temporary file name generation.
   RandomNumber rn;
 
