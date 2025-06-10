@@ -1,8 +1,11 @@
 #pragma once
 
 #include "TranslationUnitRef.h"
+#include "utils/to_string.h"
 #include "utils/has_print_on.h"
 #include "libcwd/buf2str.h"
+#include "enchantum/bitflags.hpp"
+#include "enchantum/ostream.hpp"
 #include <llvm/ADT/StringRef.h>
 #include <clang/Basic/SourceManager.h>
 #include <clang/Lex/MacroInfo.h>
@@ -60,16 +63,7 @@ class SourceRange;
 class Token;
 class MacroInfo;
 
-namespace SrcMgr {
-
-char const* to_string(CharacteristicKind characteristic_kind);
-
-inline std::ostream& operator<<(std::ostream& os, CharacteristicKind characteristic_kind)
-{
-  return os << to_string(characteristic_kind);
-}
-
-} // namespace SrcMgr
+using enchantum::ostream_operators::operator<<;
 
 inline std::ostream& operator<<(std::ostream& os, OptionalFileEntryRef opt_file_entry_ref)
 {
@@ -80,25 +74,30 @@ inline std::ostream& operator<<(std::ostream& os, OptionalFileEntryRef opt_file_
   return os;
 }
 
-char const* to_string(MacroDirective::Kind macro_directive_kind);
+#if 0
+namespace SrcMgr {
+
+inline std::ostream& operator<<(std::ostream& os, CharacteristicKind characteristic_kind)
+{
+  return os << utils::to_string(characteristic_kind);
+}
+
+} // namespace SrcMgr
 
 inline std::ostream& operator<<(std::ostream& os, MacroDirective::Kind macro_directive_kind)
 {
-  return os << to_string(macro_directive_kind);
+  return os << utils::to_string(macro_directive_kind);
 }
-
-char const* to_string(PPCallbacks::FileChangeReason file_change_reason);
 
 inline std::ostream& operator<<(std::ostream& os, PPCallbacks::FileChangeReason file_change_reason)
 {
-  return os << to_string(file_change_reason);
+  return os << utils::to_string(file_change_reason);
 }
-
-char const* to_string(PPCallbacks::LexedFileChangeReason lexed_file_change_reason);
 
 inline std::ostream& operator<<(std::ostream& os, PPCallbacks::LexedFileChangeReason lexed_file_change_reason)
 {
-  return os << to_string(lexed_file_change_reason);
+  return os << utils::to_string(lexed_file_change_reason);
 }
+#endif
 
 } // namespace clang

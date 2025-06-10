@@ -11,62 +11,6 @@
 #include "debug.h"
 
 #ifdef CWDEBUG
-namespace clang {
-namespace SrcMgr {
-
-char const* to_string(clang::SrcMgr::CharacteristicKind characteristic_kind)
-{
-  switch (characteristic_kind)
-  {
-    AI_CASE_RETURN(C_User);
-    AI_CASE_RETURN(C_System);
-    AI_CASE_RETURN(C_ExternCSystem);
-    AI_CASE_RETURN(C_User_ModuleMap);
-    AI_CASE_RETURN(C_System_ModuleMap);
-  }
-  AI_NEVER_REACHED
-}
-
-} // namespace SrcMgr
-
-char const* to_string(MacroDirective::Kind macro_directive_kind)
-{
-  using enum MacroDirective::Kind;
-  switch (macro_directive_kind)
-  {
-    AI_CASE_RETURN(MD_Define);
-    AI_CASE_RETURN(MD_Undefine);
-    AI_CASE_RETURN(MD_Visibility);
-  }
-  AI_NEVER_REACHED
-}
-
-char const* to_string(PPCallbacks::FileChangeReason file_change_reason)
-{
-  using enum PPCallbacks::FileChangeReason;
-  switch (file_change_reason)
-  {
-    AI_CASE_RETURN(EnterFile);
-    AI_CASE_RETURN(ExitFile);
-    AI_CASE_RETURN(SystemHeaderPragma);
-    AI_CASE_RETURN(RenameFile);
-  }
-  AI_NEVER_REACHED
-}
-
-char const* to_string(PPCallbacks::LexedFileChangeReason lexed_file_change_reason)
-{
-  using enum PPCallbacks::LexedFileChangeReason;
-  switch (lexed_file_change_reason)
-  {
-    AI_CASE_RETURN(EnterFile);
-    AI_CASE_RETURN(ExitFile);
-  }
-  AI_NEVER_REACHED
-}
-
-} // namespace clang
-
 namespace debug {
 
 void MacroInfo::print_on(std::ostream& os) const
