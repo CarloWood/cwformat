@@ -1,5 +1,6 @@
 #pragma once
 
+#include "utils/to_string.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Lex/Token.h"
@@ -22,18 +23,23 @@ struct PPToken
     whitespace,
     c_comment,
     cxx_comment,
-    escaped_newline,    // A "\\\n".
-    directive_hash,     // The '#' of directives.
-    directive,          // e.g., include, ifdef, ifndef, else, elif, endif, define, pragma ...
-    macro_name,         // The name of a macro that is being defined that is not a function.
-    function_macro_name,// The name of a macro that is being defined that is a function.
-    function_macro_lparen,      // The opening parenthesis of a function-like macro definition.
-    function_macro_rparen,      // The closing parenthesis of a function-like macro definition.
-    function_macro_param,       // Function-like macro parameter identifier.
-    function_macro_comma,       // Function-like macro parameter separator.
-    function_macro_ellipsis,    // The ... that is part of the parameter list of a function-like macro.
-//  macro_definition,   // The full definition line(s)
-//  macro_usage,        // An invocation of a macro (might overlap with clang::Token::identifier?)
+    escaped_newline,                    // A "\\\n".
+    directive_hash,                     // The '#' of directives.
+    directive,                          // e.g., include, ifdef, ifndef, else, elif, endif, define, pragma ...
+    macro_name,                         // The name of a macro that is being defined that is not a function.
+    function_macro_name,                // The name of a macro that is being defined that is a function.
+    function_macro_lparen,              // The opening parenthesis of a function-like macro definition.
+    function_macro_rparen,              // The closing parenthesis of a function-like macro definition.
+    function_macro_param,               // Function-like macro parameter identifier.
+    function_macro_comma,               // Function-like macro parameter separator.
+    function_macro_ellipsis,            // The ... that is part of the parameter list of a function-like macro.
+//  macro_definition,                   // The full definition line(s)
+    macro_invocation_name,              // Invocation of a macro that is not a function (instead of clang::Token::identifier).
+    function_macro_invocation_name,     // Invocation of a macro that is a function.
+    function_macro_invocation_lparen,   // The opening parenthesis of a function-like macro invocation.
+    function_macro_invocation_rparen,   // The closing parenthesis of a function-like macro invocation.
+    function_macro_invocation_arg,      // Argument text of a function-like macro invocation.
+    function_macro_invocation_comma,    // Function-like macro argument separator.
     header_name,        // The <...> or "..." that follows an #include.
     pragma,             // What follows a #pragma.
     // ... other PP-specific kinds
@@ -45,18 +51,16 @@ struct PPToken
   PPToken(Kind k) : kind_(k) {}
   //  PPToken(Kind k, std::string content) : kind_(k), content_(std::move(content)) {}
 
-  inline char const* getTokenName(PPToken::Kind kind) const;
+  inline std::string_view getTokenName(PPToken::Kind kind) const;
 
 #ifdef CWDEBUG
   void print_on(std::ostream& os) const;
 #endif
 };
 
-char const* to_string(PPToken::Kind kind);
-
-char const* PPToken::getTokenName(PPToken::Kind kind) const
+std::string_view PPToken::getTokenName(PPToken::Kind kind) const
 {
-  return to_string(kind);
+  return utils::to_string(kind);
 }
 
 //

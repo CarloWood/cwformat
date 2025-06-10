@@ -63,4 +63,8 @@ target_link_libraries(cwformat
   PRIVATE
     ${CLANG_LIBS}
     ${AICXX_OBJECTS_LIST}
+    enchantum::enchantum
 )
+
+# We use utils/to_string.h
+add_subdirectory(enchantum)

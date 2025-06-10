@@ -131,7 +131,7 @@ void ClangFrontend::process_input_buffer(SourceFile const& source_file, Translat
     }
 
     // Token is in the main file; add the token to the translation unit.
-    translation_unit.add_input_token(current_location, tok);
+    translation_unit.add_input_token(tok);
   }
   Dout(dc::notice, "--- End of Tokens and Whitespace ---");
 }

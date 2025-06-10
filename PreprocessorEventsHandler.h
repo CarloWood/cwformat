@@ -107,9 +107,12 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
     CharSourceRange FilenameRange, OptionalFileEntryRef File, StringRef SearchPath, StringRef RelativePath,
     Module const* SuggestedModule, bool ModuleImported, CharacteristicKind FileType) override
   {
-    // Ignore callback for #include's that are not in our main file.
-    if (translation_unit_.source_manager().getFileID(HashLoc) != translation_unit_.file_id())
+    if (!enabled_)
+    {
+      // This #include should not be ignored if it is defined in the current TU.
+      ASSERT(!translation_unit_.contains(HashLoc));
       return;
+    }
 
     DoutEntering(dc::notice,
       "PreprocessorEventsHandler::InclusionDirective(" << print_source_location(HashLoc) << ", " << print_token(IncludeTok) << ", " << FileName
@@ -121,28 +124,44 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
     ASSERT(FilenameRange.isCharRange());
 
     // Add the directive hash.
-    translation_unit_.add_input_token<PPToken>(HashLoc, {PPToken::directive_hash});
+    translation_unit_.add_input_token(HashLoc, PPToken::directive_hash);
     // Add the include directive (including possible backslash-newlines in the middle).
-    translation_unit_.add_input_token<PPToken>(IncludeTok.getLocation(), {PPToken::directive});
+    translation_unit_.add_input_token(IncludeTok.getLocation(), PPToken::directive);
     // Add the header name directive; this includes the angle brackets or double quotes, as well as any backslash-newlines.
-    translation_unit_.add_input_token<PPToken>(FilenameRange.getAsRange(), {PPToken::header_name});
+    translation_unit_.add_input_token(FilenameRange, PPToken::header_name);
   }
 
   /// Hook called whenever a macro definition is seen.
   void MacroDefined(Token const& MacroNameTok, MacroDirective const* MD) override
   {
     if (!enabled_)
+    {
+      // This macro should not be ignored if it is defined in the current TU.
+      ASSERT(!translation_unit_.contains(MacroNameTok.getLocation()));
       return;
+    }
 
     DoutEntering(
       dc::notice, "PreprocessorEventsHandler::MacroDefined(" << print_token(MacroNameTok) << ", " << print_macro_directive(*MD) << ")");
+
+    // Get the data related to this macro definition.
+    clang::MacroInfo const* macro_info = MD->getMacroInfo();
+    SourceLocation macro_name_token_location = MacroNameTok.getLocation();
+    clang::SourceManager const& source_manager = translation_unit_.clang_frontend().source_manager();
+
+    Debug(
+      SourceLocation last_token_location = macro_info->getDefinitionEndLoc();
+      clang::CharSourceRange Range = clang::CharSourceRange::getTokenRange(macro_name_token_location, last_token_location);
+      llvm::StringRef Text = translation_unit_.clang_frontend().get_source_text(Range);
+      Dout(dc::notice, "Macro declaration: '#define " << Text.str() << "'");
+    );
 
     using offset_type = TranslationUnit::offset_type;
 
     // Get the position where the macroname begins:
     //   #  define  macroname ( arg1,  arg2, ...)
     //              ^
-    offset_type macro_name_offset = translation_unit_.source_manager().getFileOffset(MacroNameTok.getLocation());
+    offset_type macro_name_offset = source_manager.getFileOffset(macro_name_token_location);
     // Get the position of the directive hash character:
     //   #  define  macroname ( arg1,  arg2, ...)
     //   ^ (has_length will be set to 1)
@@ -158,20 +177,17 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
     // Add the define directive.
     translation_unit_.add_input_token<PPToken>(define_directive_offset, define_directive_length, {PPToken::directive});
 
-    // Get the data related to this macro definition.
-    clang::MacroInfo const* macro_info = MD->getMacroInfo();
-
     // Add the macro name.
     bool is_function_like = macro_info->isFunctionLike();
-    translation_unit_.add_input_token<PPToken>(
-      MacroNameTok.getLocation(), {is_function_like ? PPToken::function_macro_name : PPToken::macro_name});
+    translation_unit_.add_input_token(
+      macro_name_token_location, is_function_like ? PPToken::function_macro_name : PPToken::macro_name);
 
     // Get the position of the opening parenthesis if any.
     if (is_function_like)
     {
       // Add the opening parenthesis. This must immediately follow the macro name.
       translation_unit_.append_input_token(1, {PPToken::function_macro_lparen});
-      offset_type const end_offset = translation_unit_.source_manager().getFileOffset(macro_info->getDefinitionEndLoc());
+      offset_type const end_offset = source_manager.getFileOffset(macro_info->getDefinitionEndLoc());
 
       unsigned int number_of_parameters = macro_info->getNumParams();
       clang::ArrayRef<clang::IdentifierInfo const*> params = macro_info->params();
@@ -218,9 +234,7 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
 
     // Add all replacement tokens.
     for (clang::MacroInfo::const_tokens_iterator token = macro_info->tokens_begin(); token != macro_info->tokens_end(); ++token)
-      translation_unit_.add_input_token(token->getLocation(), *token);
-
-    //clang::SourceRange macro_name{MD->getMacroInfo()->getDefinitionLoc(), MD->getMacroInfo()->getDefinitionEndLoc()};
+      translation_unit_.add_input_token(*token);
   }
 
   /// Callback invoked whenever the \p Lexer moves to a different file for
@@ -244,7 +258,9 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
     DoutEntering(dc::notice, "PreprocessorEventsHandler::LexedFileChanged(" <<
         print_file_id(FID) << ", " << Reason << ", " << FileType << ", " << print_file_id(PrevFID) << ", " << print_source_location(Loc) << ")");
 
-    enabled_ = Reason == LexedFileChangeReason::EnterFile && FID == translation_unit_.file_id();
+    ASSERT(Reason == LexedFileChangeReason::EnterFile || Reason == LexedFileChangeReason::ExitFile);    // When does this happen?
+    // Disable certain functionality if we're not in the current TU.
+    enabled_ = FID == translation_unit_.file_id();
   }
 
   /// Callback invoked whenever a source file is skipped as the result
@@ -444,10 +460,34 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
   void MacroExpands(Token const& MacroNameTok, MacroDefinition const& MD, SourceRange Range, clang::MacroArgs const* Args) override
   {
     if (!enabled_)
+    {
+      // This macro expansion should not be ignored if it is defined in the current TU.
+      ASSERT(!translation_unit_.contains(Range.getBegin()));
       return;
+    }
 
-    // source_range refers to the macro invocation in the source file.
-    Dout(dc::notice, "Callback: Expanding macro '" << print_token(MacroNameTok) << "' at " << print_source_range(Range));
+    // Get the data related to this macro definition.
+    clang::MacroInfo const* macro_info = MD.getMacroInfo();
+
+#ifdef CWDEBUG
+    // Range refers to the macro invocation in the source file.
+    DoutEntering(dc::notice|continued_cf, "PreprocessorEventsHandler::MacroExpands(" << print_token(MacroNameTok) << ", MD, " << print_source_range(Range));
+    for (unsigned int arg = 0; arg < Args->getNumMacroArguments(); ++arg)
+    {
+      Token arg_token = *Args->getUnexpArgument(arg);
+      Dout(dc::continued, ", " << print_token(arg_token) << " (length: " << arg_token.getLength() << ")");
+    }
+    Dout(dc::finish, ")");
+#endif
+
+    // Add the macro name.
+    if (!macro_info->isFunctionLike())
+    {
+      translation_unit_.add_input_token(MacroNameTok.getLocation(), PPToken::macro_invocation_name);
+      return;
+    }
+
+    translation_unit_.add_input_token(MacroNameTok.getLocation(), PPToken::function_macro_invocation_name);
   }
 
   /// Hook called whenever a macro \#undef is seen.

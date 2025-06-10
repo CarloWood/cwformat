@@ -201,18 +201,26 @@ class ClangFrontend : public OptionsBase
  public:
   ClangFrontend(configure_header_search_options_type configure_header_search_options, configure_commandline_macro_definitions_type configure_commandline_macro_definitions);
 
+  // Reads from input_buffer and writes to translation_unit.
+  void process_input_buffer(SourceFile const& source_file, TranslationUnit& translation_unit) const;
+
+  // Accessor.
+  clang::SourceManager const& source_manager() const { return source_manager_; }
+
   void begin_source_file(SourceFile const& source_file, TranslationUnit& translation_unit);
   void end_source_file();
 
-  clang::SourceManager const& source_manager() const { return source_manager_; }
+  // Tasks that require lang_options_.
 
-  std::pair<unsigned int, size_t> measure_token_length(clang::SourceLocation location)
+  std::pair<unsigned int, size_t> measure_token_length(clang::SourceLocation token_location) const
   {
-    return {source_manager_.getFileOffset(location), clang::Lexer::MeasureTokenLength(location, source_manager_, lang_options_)};
+    return {source_manager_.getFileOffset(token_location), clang::Lexer::MeasureTokenLength(token_location, source_manager_, lang_options_)};
   }
 
-  // Reads from input_buffer and writes to translation_unit.
-  void process_input_buffer(SourceFile const& source_file, TranslationUnit& translation_unit) const;
+  clang::StringRef get_source_text(clang::CharSourceRange const& range) const
+  {
+    return clang::Lexer::getSourceText(range, source_manager_, lang_options_);
+  }
 
  private:
   static clang::TargetInfo* create_target_info(

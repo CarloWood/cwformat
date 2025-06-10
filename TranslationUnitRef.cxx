@@ -20,7 +20,7 @@ void FileID::print_on(std::ostream& os) const
     return;
   }
 
-  clang::SourceManager const& source_manager = translation_unit_.source_manager();
+  clang::SourceManager const& source_manager = translation_unit_.clang_frontend().source_manager();
 
   bool is_invalid = false;
   clang::SrcMgr::SLocEntry const& slocEntry = source_manager.getSLocEntry(file_id_, &is_invalid);
@@ -51,7 +51,8 @@ void SourceLocation::print_on(std::ostream& os) const
     return;
   }
 
-  clang::SourceManager const& source_manager = translation_unit_.source_manager();
+  clang::SourceManager const& source_manager = translation_unit_.clang_frontend().source_manager();
+
   if (location_.isMacroID())
     os << "<macro>" << location_.printToString(source_manager) << "</macro>";
   else
@@ -84,7 +85,7 @@ void CharSourceRange::print_on(std::ostream& os) const
   SourceLocation begin{translation_unit_, char_source_range_.getBegin()};
   SourceLocation end{translation_unit_, char_source_range_.getEnd()};
 
-  clang::SourceManager const& source_manager = translation_unit_.source_manager();
+  clang::SourceManager const& source_manager = translation_unit_.clang_frontend().source_manager();
   std::pair<clang::FileID, unsigned int> begin_location = source_manager.getDecomposedLoc(begin.location_);
   std::pair<clang::FileID, unsigned int> end_location = source_manager.getDecomposedLoc(end.location_);
 
@@ -121,7 +122,7 @@ void MacroDirective::print_on(std::ostream& os) const
 {
   clang::MacroDirective::Kind kind = macro_directive_.getKind();
   clang::MacroInfo const* macro_info = macro_directive_.getMacroInfo();
-  os << "<" << kind << ">, " << MacroInfo{translation_unit_, *macro_info} << " @ " << PrintSourceLocation{translation_unit_}(macro_directive_.getLocation());
+  os << "{<" << kind << ">, " << MacroInfo{translation_unit_, *macro_info} << " @ " << PrintSourceLocation{translation_unit_}(macro_directive_.getLocation()) << '}';
 }
 
 } // namespace debug

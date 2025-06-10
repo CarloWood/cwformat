@@ -35,11 +35,6 @@ void TranslationUnit::process(SourceFile const& source_file)
   clang_frontend_.process_input_buffer(source_file, *this);
 }
 
-clang::SourceManager const& TranslationUnit::source_manager() const
-{
-  return clang_frontend_.source_manager();
-}
-
 void TranslationUnit::eof()
 {
   // Process any remaining gap at the end of the file.
@@ -52,6 +47,7 @@ void TranslationUnit::eof()
     Dout(dc::notice,
       "End of File Gap: FileOffset: " << last_offset_ << ", Length: " << gap_length << ", Text: '" << buf2str(gap_text.data(), gap_text.size())
                                       << "'");
+    process_gap(end_offset);
   }
 }
 
@@ -225,7 +221,8 @@ std::pair<TranslationUnit::offset_type, size_t> TranslationUnit::process_gap(off
       if (looking_for == error)
       {
         // This gap contains a PPToken that should have been detected.
-        THROW_ALERT("Gap contains non-whitespace");
+        gap_text.remove_prefix(i);
+        THROW_ALERT("Gap contains non-whitespace at [ERROR_LOCATION]", AIArgs("[ERROR_LOCATION]", libcwd::buf2str(gap_text)));
       }
     }
     if (looking_for == more_whitespace)
@@ -241,6 +238,22 @@ std::pair<TranslationUnit::offset_type, size_t> TranslationUnit::process_gap(off
 
   // No fixed_string, so the return value isn't used.
   return {};
+}
+
+void TranslationUnit::add_input_token(clang::CharSourceRange char_source_range, PPToken const& token)
+{
+  DoutEntering(dc::notice,
+    "TranslationUnit::add_input_token(" << print_char_source_range(char_source_range) << ", " << print_token(token) << ")");
+
+  clang::SourceManager const& source_manager = clang_frontend_.source_manager();
+  offset_type begin_offset = source_manager.getFileOffset(char_source_range.getBegin());
+  offset_type end_offset = source_manager.getFileOffset(char_source_range.getEnd());
+  if (char_source_range.isTokenRange())
+  {
+    auto [last_token_offset, last_token_length] = clang_frontend_.measure_token_length(char_source_range.getEnd());
+    end_offset += last_token_length;
+  }
+  add_input_token(begin_offset, end_offset - begin_offset, token);
 }
 
 void TranslationUnit::print(std::ostream& os) const

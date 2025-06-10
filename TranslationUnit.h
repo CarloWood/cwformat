@@ -47,15 +47,29 @@ class TranslationUnit : public NoaContainer COMMA_CWDEBUG_ONLY(public Translatio
 
   template<typename TOKEN>
   requires std::is_same_v<TOKEN, clang::Token> || std::is_same_v<TOKEN, PPToken>
-  void add_input_token(clang::SourceLocation token_location, TOKEN const& token);
-
-  template<typename TOKEN>
-  requires std::is_same_v<TOKEN, clang::Token> || std::is_same_v<TOKEN, PPToken>
-  void add_input_token(clang::SourceRange token_range, TOKEN const& token);
-
-  template<typename TOKEN>
-  requires std::is_same_v<TOKEN, clang::Token> || std::is_same_v<TOKEN, PPToken>
   void add_input_token(offset_type token_offset, size_t token_length, TOKEN const& token, bool ProcessGap = true);
+
+  // Add a given clang::Token (possibly adding preceding whitespace first).
+  void add_input_token(clang::Token const& token)
+  {
+    DoutEntering(dc::notice, "TranslationUnit::add_input_token(" << print_token(token) << ")");
+
+    clang::SourceLocation token_location = token.getLocation();
+
+    unsigned int token_offset = clang_frontend_.source_manager().getFileOffset(token_location);
+    size_t token_length = token.getLength();
+    add_input_token(token_offset, token_length, token);
+  }
+
+  void add_input_token(clang::SourceLocation token_location, PPToken const& token)
+  {
+    DoutEntering(dc::notice, "TranslationUnit::add_input_token(" << print_source_location(token_location) << ", " << print_token(token) << ")");
+
+    auto [token_offset, token_length] = clang_frontend_.measure_token_length(token_location);
+    add_input_token(token_offset, token_length, token);
+  }
+
+  void add_input_token(clang::CharSourceRange char_source_range, PPToken const& token);
 
   // Append a token without allowing whitespace (except backslash-newlines).
   void append_input_token(size_t token_length, PPToken const& token);
@@ -67,10 +81,18 @@ class TranslationUnit : public NoaContainer COMMA_CWDEBUG_ONLY(public Translatio
     append_input_token(token_length, token);
   }
 
-  clang::SourceManager const& source_manager() const;
   SourceFile const& source_file() const { return source_file_; }
   clang::FileID file_id() const { return file_id_; }
   clang::Preprocessor& get_pp() const { return *preprocessor_; }
+  ClangFrontend const& clang_frontend() const { return clang_frontend_; }
+
+  // Return true if Loc is inside this TU.
+  bool contains(clang::SourceLocation Loc) const
+  {
+    ASSERT(Loc.isValid());
+    ASSERT(Loc.isFileID());   // What to do if this is not true?
+    return clang_frontend_.source_manager().getFileID(Loc) == file_id_;
+  }
 
 #ifdef CWDEBUG
   std::string const& name() const { return name_; }
@@ -86,30 +108,6 @@ class TranslationUnit : public NoaContainer COMMA_CWDEBUG_ONLY(public Translatio
   // Called from add_input_token and PreprocessorEventsHandler::MacroDefined.
   std::pair<offset_type, size_t> process_gap(offset_type token_offset, char const* fixed_string = nullptr);
 };
-
-template<typename TOKEN>
-requires std::is_same_v<TOKEN, clang::Token> || std::is_same_v<TOKEN, PPToken>
-void TranslationUnit::add_input_token(clang::SourceLocation token_location, TOKEN const& token)
-{
-  DoutEntering(dc::notice,
-    "TranslationUnit::add_input_token(" << print_source_location(token_location) << ", " << print_token(token) << ")");
-
-  auto [token_offset, token_length] = clang_frontend_.measure_token_length(token_location);
-  add_input_token(token_offset, token_length, token);
-}
-
-template<typename TOKEN>
-requires std::is_same_v<TOKEN, clang::Token> || std::is_same_v<TOKEN, PPToken>
-void TranslationUnit::add_input_token(clang::SourceRange token_range, TOKEN const& token)
-{
-  DoutEntering(dc::notice,
-    "TranslationUnit::add_input_token(" << print_source_range(token_range) << ", " << print_token(token) << ")");
-
-  clang::SourceManager const& source_manager = clang_frontend_.source_manager();
-  offset_type begin_offset = source_manager.getFileOffset(token_range.getBegin());
-  offset_type end_offset = source_manager.getFileOffset(token_range.getEnd());
-  add_input_token(begin_offset, end_offset - begin_offset, token);
-}
 
 template<typename TOKEN>
 requires std::is_same_v<TOKEN, clang::Token> || std::is_same_v<TOKEN, PPToken>

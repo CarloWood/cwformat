@@ -80,7 +80,7 @@ void MacroInfo::print_on(std::ostream& os) const
           [this](std::ostream& os, clang::Token const& token){ os << print_token(token); }) <<
       ", NumParameters:" << macro_info_.getNumParams() <<
       ", NumReplacementTokens:" << macro_info_.getNumTokens() <<
-      ", DefinitionLength:" << macro_info_.getDefinitionLength(translation_unit_.source_manager()) <<
+      ", DefinitionLength:" << macro_info_.getDefinitionLength(translation_unit_.clang_frontend().source_manager()) <<
       ", IsFunctionLike:" << std::boolalpha << macro_info_.isFunctionLike() <<
       ", IsC99Varargs:" << macro_info_.isC99Varargs() <<
       ", IsGNUVarargs:" << macro_info_.isGNUVarargs() <<
