@@ -32,7 +32,9 @@ class TranslationUnit : public NoaContainer COMMA_CWDEBUG_ONLY(public Translatio
   SourceFile const& source_file_;
   clang::FileID file_id_;                               // The file ID of this translation unit.
   std::unique_ptr<clang::Preprocessor> preprocessor_;   // A preprocessor instance used for this translation unit.
-  offset_type last_offset_;
+  offset_type last_offset_;                             // The offset of the last InputToken that was added, or zero if none were added yet.
+  std::vector<InputToken> input_tokens_;
+  bool last_token_was_function_macro_invocation_name_ = false;
 
 #ifdef CWDEBUG
   std::string name_;
@@ -67,6 +69,9 @@ class TranslationUnit : public NoaContainer COMMA_CWDEBUG_ONLY(public Translatio
 
     auto [token_offset, token_length] = clang_frontend_.measure_token_length(token_location);
     add_input_token(token_offset, token_length, token);
+
+    if (token.kind_ == PPToken::function_macro_invocation_name)
+      last_token_was_function_macro_invocation_name_ = true;
   }
 
   void add_input_token(clang::CharSourceRange char_source_range, PPToken const& token);
@@ -106,7 +111,7 @@ class TranslationUnit : public NoaContainer COMMA_CWDEBUG_ONLY(public Translatio
 
   friend class PreprocessorEventsHandler;
   // Called from add_input_token and PreprocessorEventsHandler::MacroDefined.
-  std::pair<offset_type, size_t> process_gap(offset_type token_offset, char const* fixed_string = nullptr);
+  std::pair<offset_type, size_t> process_gap(offset_type const current_offset, char const* fixed_string = nullptr);
 };
 
 template<typename TOKEN>
@@ -129,7 +134,7 @@ void TranslationUnit::add_input_token(offset_type token_offset, size_t token_len
 
   // Create an InputToken.
   Dout(dc::notice, "Adding " << print_token(token) << " `" << buf2str(token_view) << "`.");
-  InputToken input_token(token, token_view);
+  input_tokens_.emplace_back(token, token_view);
 
   // Update last_offset to the position after the current token.
   last_offset_ = token_offset + token_length;

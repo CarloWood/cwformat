@@ -39,6 +39,7 @@ add_executable(cwformat
   DiagnosticConsumer.cxx
   SourceFile.cxx
   TranslationUnit.cxx
+  CodeScanner.cxx
   NoaContainer.cxx
   InputToken.cxx
 )
@@ -68,3 +69,13 @@ target_link_libraries(cwformat
 
 # We use utils/to_string.h
 add_subdirectory(enchantum)
+
+add_executable(scantest
+  scantest.cpp
+  CodeScanner.cxx
+)
+
+target_link_libraries(scantest
+  PRIVATE
+    ${AICXX_OBJECTS_LIST}
+)

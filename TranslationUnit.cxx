@@ -1,10 +1,12 @@
 #include "sys.h"
 #include "TranslationUnit.h"
+#include "CodeScanner.h"
 #include "utils/AIAlert.h"
 #include <clang/Lex/Preprocessor.h>
 #include "ClangFrontend.h"
 #include "InputToken.h"
 #include "SourceFile.h"
+#include <ranges>
 #ifdef CWDEBUG
 #include "utils/print_pointer.h"
 #include <libcwd/buf2str.h>
@@ -88,7 +90,7 @@ void TranslationUnit::append_input_token(size_t token_length, PPToken const& tok
 //
 // fixed_string must begin with a character that is not whitespace or a slash.
 //
-std::pair<TranslationUnit::offset_type, size_t> TranslationUnit::process_gap(offset_type current_offset, char const* fixed_string)
+std::pair<TranslationUnit::offset_type, size_t> TranslationUnit::process_gap(offset_type const current_offset, char const* fixed_string)
 {
   DoutEntering(dc::notice, "TranslationUnit::process_gap(" << current_offset << ", " << debug::print_string(fixed_string) << ")");
 
@@ -102,6 +104,51 @@ std::pair<TranslationUnit::offset_type, size_t> TranslationUnit::process_gap(off
     auto gap_text = source_file_.span(gap_start, gap_length);
 
     Dout(dc::notice, "Skipped : from offset " << gap_start << ", length: " << gap_length << "; text: '" << buf2str(gap_text) << "'");
+
+    // Check if we still have to decode the macro arguments of a previous function-like macro invocation.
+    if (last_token_was_function_macro_invocation_name_)
+    {
+      last_token_was_function_macro_invocation_name_ = false;
+
+      CodeScanner scanner(gap_text);
+      std::vector<LParenCommaRParen> const& parens_and_commas = scanner.parens_and_commas();
+      ASSERT(parens_and_commas.size() >= 2);    // There should at least be the opening and closing parenthesis.
+      ASSERT(parens_and_commas.front().kind_ == LParenCommaRParen::lparen);  // The first one must be the opening parenthesis.
+      ASSERT(parens_and_commas.back().kind_ == LParenCommaRParen::rparen);   // The last one must be the closing parenthesis.
+
+      // Consider the code
+      //
+      // initial pos:     ptr                      ptr                      ptr                      ptr
+      //                   |                        |                        |                        |
+      //                   v                        v                        v                        v
+      // MY_MACRO<--gap1-->(<--gap2-->arg1<--gap3-->,<--gap4-->arg2<--gap5-->,<--gap6-->arg3<--gap7-->)<--gap8-->next_thing
+      //                              ^  ^
+      //                              |  |
+      //                      arg_start  arg_end
+
+      std::vector<LParenCommaRParen>::const_iterator ptr = parens_and_commas.begin();                           // Points to the '('.
+      add_input_token<PPToken>(gap_start + ptr->offset_, 1, {PPToken::function_macro_invocation_lparen});       // This adds '<--gap1-->' and '('.
+      for (;;)
+      {
+        CodeScanner::iterator arg_start(scanner, ptr->offset_); // Create an CodeScanner::iterator that points to the '(' or ',' left of the current argument.
+        if (++ptr == parens_and_commas.end())                   // We're done, `arg_start` already points to the ')'.
+          break;
+        CodeScanner::iterator arg_end(scanner, ptr->offset_);   // Create an CodeScanner::iterator that points to the ',' or ')' to the right of the current argument.
+        // Skip whitespace, C- and C++ comments, if any, so that arg_start points to the start of the argument between left and right.
+        ++arg_start;
+        // Skip whitespace, C- and C++ comments going backwards, if any, so that arg_end points to the end of the argument between left and right.
+        --arg_end;
+        add_input_token<PPToken>(gap_start + arg_start.offset(), arg_end - arg_start + 1, {PPToken::function_macro_invocation_arg});    // This adds '<--gap{N+1}-->' and 'arg{N}'.
+        // Add the ',' or ')' following the current argument.
+        add_input_token<PPToken>(gap_start + ptr->offset_, 1, {PPToken::function_macro_invocation_comma});    // This adds '<--gap{N}-->' and the following ',' or ')'.
+        // Go to the next argument.
+      }
+
+      // Re-initialize the remaining gap before falling through.
+      gap_start = last_offset_;
+      gap_length = current_offset - gap_start;
+      gap_text = source_file_.span(gap_start, gap_length);
+    }
 
     // Scan the gap for whitespace, backslash-newlines, newlines and comments.
     enum LookingForType
