@@ -22,7 +22,8 @@ CodeScanner::CodeScanner(std::string_view const& input) : input_(input), paren_l
       skippable_regions_.emplace_back(region_start, offset);    // offset is the region end (inclusive).
     state = code;
   };
-  for (offset = 0; offset < input.size() - 1; ++offset)
+  // Loop over all character pairs of the input.
+  for (offset = 0; offset < input.size() - 1; ++offset)         // -1 so that `nc` can still be read.
   {
     char c = input[offset];
     char nc = input[offset + 1];
@@ -83,9 +84,17 @@ CodeScanner::CodeScanner(std::string_view const& input) : input_(input), paren_l
         break;
     }
   }
+  // Handle the last character.
   offset = input.size() - 1;
+  char c = input[offset];
   if (state != code)
-    close_region();           // Pretend that the last character always closes an open region.
+    close_region();             // Pretend that the last character always closes an open region.
+  else if (c == ')')            // We're not interested in opening a char-literal or string-literal, but we need to handle a closing brace.
+  {
+    --paren_level_;
+    if (paren_level_ == 0)
+      parens_and_commas_.emplace_back(LParenCommaRParen::rparen, offset);
+  }
 }
 
 char CodeScannerIterator::operator*() const
