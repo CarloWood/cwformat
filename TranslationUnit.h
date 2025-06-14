@@ -29,7 +29,7 @@ class TranslationUnit : public NoaContainer COMMA_CWDEBUG_ONLY(public Translatio
 
  private:
   ClangFrontend& clang_frontend_;
-  SourceFile const& source_file_;
+  SourceFile const& source_file_;                       // The source file of this translation unit.
   clang::FileID file_id_;                               // The file ID of this translation unit.
   std::unique_ptr<clang::Preprocessor> preprocessor_;   // A preprocessor instance used for this translation unit.
   offset_type last_offset_;                             // The offset of the last InputToken that was added, or zero if none were added yet.
@@ -44,7 +44,7 @@ class TranslationUnit : public NoaContainer COMMA_CWDEBUG_ONLY(public Translatio
   TranslationUnit(ClangFrontend& clang_frontend, SourceFile const& source_file COMMA_CWDEBUG_ONLY(std::string const& name));
   ~TranslationUnit();
 
-  void process(SourceFile const& source_file);
+  void process();
   void eof();
 
   template<typename TOKEN>

@@ -202,7 +202,7 @@ class ClangFrontend : public OptionsBase
   ClangFrontend(configure_header_search_options_type configure_header_search_options, configure_commandline_macro_definitions_type configure_commandline_macro_definitions);
 
   // Reads from input_buffer and writes to translation_unit.
-  void process_input_buffer(SourceFile const& source_file, TranslationUnit& translation_unit) const;
+  void process_input_buffer(TranslationUnit& translation_unit) const;
 
   // Accessor.
   clang::SourceManager const& source_manager() const { return source_manager_; }

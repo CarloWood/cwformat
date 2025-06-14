@@ -404,8 +404,8 @@ void process_filename(ClangFrontend& clang_frontend, RandomNumber& rn, std::file
   bool success = false;
   try
   {
-    // Read the source_file into translation_unit.
-    translation_unit.process(source_file);
+    // Read the source file into translation_unit.
+    translation_unit.process();
     // Write the result to the output stream.
     translation_unit.print(*output_stream_ptr);
 

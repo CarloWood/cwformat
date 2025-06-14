@@ -68,36 +68,28 @@ clang::TargetInfo* ClangFrontend::create_target_info(
   return target_info;
 };
 
-void ClangFrontend::process_input_buffer(SourceFile const& source_file, TranslationUnit& translation_unit) const
+void ClangFrontend::process_input_buffer(TranslationUnit& translation_unit) const
 {
   clang::Preprocessor& pp = translation_unit.get_pp();
 
-  // --- 3. Attach Callbacks ---
+  // Attach preprocessor callbacks.
   pp.addPPCallbacks(std::make_unique<PreprocessorEventsHandler>(translation_unit));
 
-  // --- 4. Initialize Preprocessor & Configure ---
+  // Initialize the preprocessor.
   pp.Initialize(*target_info_);
   clang::InitializePreprocessor(pp, *preprocessor_options_, *pch_container_reader_ptr_, frontend_options_, code_gen_options_);
-
-//  pp.SetCommentRetentionState(true, true);
   pp.SetSuppressIncludeNotFoundError(false);
-
-  // --- 5. Enter Main File ---
-  pp.EnterMainSourceFile();
-
-  // --- 6. The Enhanced Tokenization Loop ---
-  Dout(dc::notice, "--- Tokens and Whitespace for " << source_file.filename() << " ---");
-  clang::Token tok;
-
-  clang::SourceLocation FileStartLoc = source_manager_.getLocForStartOfFile(translation_unit.file_id());
 
 #ifdef CWDEBUG
   PrintSourceLocation print_source_location(translation_unit);
 #endif
 
+  // Start processing the source_file.
+  pp.EnterMainSourceFile();
+  clang::Token tok;
   for (;;)
   {
-    // --- Lex the next token ---
+    // Lex the next token.
     pp.Lex(tok);
 
     // Stop if we reached the end of the file.
@@ -133,5 +125,4 @@ void ClangFrontend::process_input_buffer(SourceFile const& source_file, Translat
     // Token is in the main file; add the token to the translation unit.
     translation_unit.add_input_token(tok);
   }
-  Dout(dc::notice, "--- End of Tokens and Whitespace ---");
 }

@@ -31,10 +31,10 @@ void TranslationUnit::init(clang::FileID file_id, std::unique_ptr<clang::Preproc
   preprocessor_ = std::move(preprocessor);
 }
 
-void TranslationUnit::process(SourceFile const& source_file)
+void TranslationUnit::process()
 {
   last_offset_ = 0;
-  clang_frontend_.process_input_buffer(source_file, *this);
+  clang_frontend_.process_input_buffer(*this);
 }
 
 void TranslationUnit::eof()
@@ -126,22 +126,25 @@ std::pair<TranslationUnit::offset_type, size_t> TranslationUnit::process_gap(off
       //                              |  |
       //                      arg_start  arg_end
 
-      std::vector<LParenCommaRParen>::const_iterator ptr = parens_and_commas.begin();                           // Points to the '('.
-      add_input_token<PPToken>(gap_start + ptr->offset_, 1, {PPToken::function_macro_invocation_lparen});       // This adds '<--gap1-->' and '('.
-      for (;;)
+      // Abbreviations.
+      PPToken::Kind lparen = PPToken::function_macro_invocation_lparen;
+      PPToken::Kind comma  = PPToken::function_macro_invocation_comma;
+      PPToken::Kind rparen = PPToken::function_macro_invocation_rparen;
+      std::vector<LParenCommaRParen>::const_iterator ptr = parens_and_commas.begin();   // Points to the '('.
+      for (PPToken::Kind ptr_kind = lparen;; ptr_kind = ptr->kind_ == LParenCommaRParen::comma ? comma : rparen)
       {
-        CodeScanner::iterator arg_start(scanner, ptr->offset_); // Create an CodeScanner::iterator that points to the '(' or ',' left of the current argument.
-        if (++ptr == parens_and_commas.end())                   // We're done, `arg_start` already points to the ')'.
+        // Add the character that `ptr` is pointing to. This adds '<--gap{N}-->' and the '(', ',' or ')' that follows.
+        add_input_token<PPToken>(gap_start + ptr->offset_, 1, {ptr_kind});
+        if (ptr_kind == rparen) // Are we done?
           break;
-        CodeScanner::iterator arg_end(scanner, ptr->offset_);   // Create an CodeScanner::iterator that points to the ',' or ')' to the right of the current argument.
-        // Skip whitespace, C- and C++ comments, if any, so that arg_start points to the start of the argument between left and right.
+        // Create an CodeScanner::iterator that points to the '(' or ',' on the left of the target argument and then advance it to the start of that argument.
+        CodeScanner::iterator arg_start(scanner, ptr->offset_);
         ++arg_start;
-        // Skip whitespace, C- and C++ comments going backwards, if any, so that arg_end points to the end of the argument between left and right.
+        // Create an CodeScanner::iterator that points to the ',' or ')' on the right of the target argument and then retreat it to the end of that argument.
+        CodeScanner::iterator arg_end(scanner, (++ptr)->offset_);
         --arg_end;
-        add_input_token<PPToken>(gap_start + arg_start.offset(), arg_end - arg_start + 1, {PPToken::function_macro_invocation_arg});    // This adds '<--gap{N+1}-->' and 'arg{N}'.
-        // Add the ',' or ')' following the current argument.
-        add_input_token<PPToken>(gap_start + ptr->offset_, 1, {PPToken::function_macro_invocation_comma});    // This adds '<--gap{N}-->' and the following ',' or ')'.
-        // Go to the next argument.
+        // Add '<--gap{N+1}-->' and 'arg{N}'.
+        add_input_token<PPToken>(gap_start + arg_start.offset(), arg_end - arg_start + 1, {PPToken::function_macro_invocation_arg});
       }
 
       // Re-initialize the remaining gap before falling through.
