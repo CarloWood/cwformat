@@ -60,6 +60,7 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
 
   PreprocessorEventsHandler(TranslationUnit& translation_unit) : TranslationUnitRef(translation_unit), enabled_(true) {}
 
+ private:
   /// Callback invoked whenever an inclusion directive of
   /// any kind (\c \#include, \c \#import, etc.) has been processed, regardless
   /// of whether the inclusion will actually result in an inclusion.
@@ -271,7 +272,11 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
   /// \param FilenameTok The file name token in \#include "FileName" directive
   /// or macro expanded file name token from \#include MACRO(PARAMS) directive.
   /// Note that FilenameTok contains corresponding quotes/angles symbols.
-  void FileSkipped(FileEntryRef const& SkippedFile, Token const& FilenameTok, CharacteristicKind FileType) override { ASSERT(!enabled_);; }
+  void FileSkipped(FileEntryRef const& SkippedFile, Token const& FilenameTok, CharacteristicKind FileType) override
+  {
+    DoutEntering(dc::notice, "PreprocessorEventsHandler::FileSkipped(" <<
+        SkippedFile.getName() << ", " << print_token(FilenameTok) << ", " << FileType);
+  }
 
   /// Callback invoked whenever the preprocessor cannot find a file for an
   /// embed directive.
@@ -518,61 +523,150 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
   /// 'endif').
   void SourceRangeSkipped(SourceRange Range, SourceLocation EndifLoc) override { ASSERT(!enabled_);; }
 
+  auto print_argument(Token const& token)
+  {
+    return print_token(token);
+  }
+
+  auto print_argument(SourceRange const& source_range)
+  {
+    return print_source_range(source_range);
+  }
+
+  auto print_argument(clang::FileID file_id)
+  {
+    return print_file_id(file_id);
+  }
+
+  auto print_argument(clang::SourceLocation loc)
+  {
+    return print_source_location(loc);
+  }
+
+  auto print_argument(clang::CharSourceRange const& char_range)
+  {
+    return print_char_source_range(char_range);
+  }
+
+  auto print_argument(clang::MacroDirective const& macro_directive)
+  {
+    return print_macro_directive(macro_directive);
+  }
+
+  // Adds PPToken::directive_hash followed by the PPToken::directive at DirectiveLocation.
+  template<typename ...Args>
+  void add_directive(SourceLocation DirectiveLocation COMMA_CWDEBUG_ONLY(char const* func_name, Args&&... args))
+  {
+    if (!enabled_)
+    {
+      // This directive should not be ignored if it is used in the current TU.
+      ASSERT(!translation_unit_.contains(DirectiveLocation));
+      return;
+    }
+
+#ifdef CWDEBUG
+    int debug_indentation = 2;
+    LibcwDoutScopeBegin(DEBUGCHANNELS, ::libcwd::libcw_do, dc::notice)
+    LibcwDoutStream << "Entering PreprocessorEventsHandler::" << func_name << "(" << print_source_location(DirectiveLocation);
+    ( (LibcwDoutStream << ", " << print_argument(std::forward<Args>(args))), ... );
+    LibcwDoutStream << ")";
+    LibcwDoutScopeEnd;
+    NAMESPACE_DEBUG::Indent debug_indent(debug_indentation);
+#endif
+
+    // Add the directive hash and the directive itself.
+    // The very first non-whitespace or comment should be the hash that belongs to the directive.
+    translation_unit_.add_input_token("#", PPToken::directive_hash);
+    translation_unit_.add_input_token(DirectiveLocation, PPToken::directive);
+  }
+
   /// Hook called whenever an \#if is seen.
   /// \param Loc the source location of the directive.
   /// \param ConditionRange The SourceRange of the expression being tested.
   /// \param ConditionValue The evaluated value of the condition.
   ///
-  void If(SourceLocation Loc, SourceRange ConditionRange, ConditionValueKind ConditionValue) override { ASSERT(!enabled_);; }
+  void If(SourceLocation DirectiveLocation, SourceRange ConditionRange, ConditionValueKind ConditionValue) override
+  {
+    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("If", ConditionRange));
+  }
 
   /// Hook called whenever an \#elif is seen.
   /// \param Loc the source location of the directive.
   /// \param ConditionRange The SourceRange of the expression being tested.
   /// \param ConditionValue The evaluated value of the condition.
   /// \param IfLoc the source location of the \#if/\#ifdef/\#ifndef directive.
-  void Elif(SourceLocation Loc, SourceRange ConditionRange, ConditionValueKind ConditionValue, SourceLocation IfLoc) override { ASSERT(!enabled_);; }
+  void Elif(SourceLocation DirectiveLocation, SourceRange ConditionRange, ConditionValueKind ConditionValue, SourceLocation IfLoc) override
+  {
+    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Elif"));
+  }
 
   /// Hook called whenever an \#ifdef is seen.
   /// \param Loc the source location of the directive.
   /// \param MacroNameTok Information on the token being tested.
   /// \param MD The MacroDefinition if the name was a macro, null otherwise.
-  void Ifdef(SourceLocation Loc, Token const& MacroNameTok, MacroDefinition const& MD) override { ASSERT(!enabled_);; }
+  void Ifdef(SourceLocation DirectiveLocation, Token const& MacroNameTok, MacroDefinition const& MD) override
+  {
+    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Ifdef", MacroNameTok));
+  }
 
   /// Hook called whenever an \#elifdef branch is taken.
   /// \param Loc the source location of the directive.
   /// \param MacroNameTok Information on the token being tested.
   /// \param MD The MacroDefinition if the name was a macro, null otherwise.
-  void Elifdef(SourceLocation Loc, Token const& MacroNameTok, MacroDefinition const& MD) override { ASSERT(!enabled_);; }
+  void Elifdef(SourceLocation DirectiveLocation, Token const& MacroNameTok, MacroDefinition const& MD) override
+  {
+    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Elifdef"));
+  }
+
   /// Hook called whenever an \#elifdef is skipped.
   /// \param Loc the source location of the directive.
   /// \param ConditionRange The SourceRange of the expression being tested.
   /// \param IfLoc the source location of the \#if/\#ifdef/\#ifndef directive.
-  void Elifdef(SourceLocation Loc, SourceRange ConditionRange, SourceLocation IfLoc) override { ASSERT(!enabled_);; }
+  void Elifdef(SourceLocation DirectiveLocation, SourceRange ConditionRange, SourceLocation IfLoc) override
+  {
+    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Elifdef"));
+  }
 
   /// Hook called whenever an \#ifndef is seen.
   /// \param Loc the source location of the directive.
   /// \param MacroNameTok Information on the token being tested.
   /// \param MD The MacroDefiniton if the name was a macro, null otherwise.
-  void Ifndef(SourceLocation Loc, Token const& MacroNameTok, MacroDefinition const& MD) override { ASSERT(!enabled_);; }
+  void Ifndef(SourceLocation DirectiveLocation, Token const& MacroNameTok, MacroDefinition const& MD) override
+  {
+    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Ifndef"));
+  }
 
   /// Hook called whenever an \#elifndef branch is taken.
   /// \param Loc the source location of the directive.
   /// \param MacroNameTok Information on the token being tested.
   /// \param MD The MacroDefinition if the name was a macro, null otherwise.
-  void Elifndef(SourceLocation Loc, Token const& MacroNameTok, MacroDefinition const& MD) override { ASSERT(!enabled_);; }
+  void Elifndef(SourceLocation DirectiveLocation, Token const& MacroNameTok, MacroDefinition const& MD) override
+  {
+    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Elifndef"));
+  }
+
   /// Hook called whenever an \#elifndef is skipped.
   /// \param Loc the source location of the directive.
   /// \param ConditionRange The SourceRange of the expression being tested.
   /// \param IfLoc the source location of the \#if/\#ifdef/\#ifndef directive.
-  void Elifndef(SourceLocation Loc, SourceRange ConditionRange, SourceLocation IfLoc) override { ASSERT(!enabled_);; }
+  void Elifndef(SourceLocation DirectiveLocation, SourceRange ConditionRange, SourceLocation IfLoc) override
+  {
+    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Elifndef"));
+  }
 
   /// Hook called whenever an \#else is seen.
   /// \param Loc the source location of the directive.
   /// \param IfLoc the source location of the \#if/\#ifdef/\#ifndef directive.
-  void Else(SourceLocation Loc, SourceLocation IfLoc) override { ASSERT(!enabled_);; }
+  void Else(SourceLocation DirectiveLocation, SourceLocation IfLoc) override
+  {
+    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Else"));
+  }
 
   /// Hook called whenever an \#endif is seen.
   /// \param Loc the source location of the directive.
   /// \param IfLoc the source location of the \#if/\#ifdef/\#ifndef directive.
-  void Endif(SourceLocation Loc, SourceLocation IfLoc) override { ASSERT(!enabled_);; }
+  void Endif(SourceLocation DirectiveLocation, SourceLocation IfLoc) override
+  {
+    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Endif"));
+  }
 };

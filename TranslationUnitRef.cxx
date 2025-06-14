@@ -98,7 +98,7 @@ void CharSourceRange::print_on(std::ostream& os) const
   {
     ASSERT(begin_location.second <= end_location.second);
     size_t size = end_location.second - begin_location.second;
-    os << '"' << libcwd::buf2str(translation_unit_.source_file().span(begin_location.second, size)) << '"';
+    os << "⟪" << libcwd::buf2str(translation_unit_.source_file().span(begin_location.second, size)) << "⟫";
     prefix = " [";
     postfix = ">";
     separator = ", ";

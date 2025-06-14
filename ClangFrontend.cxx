@@ -100,7 +100,6 @@ void ClangFrontend::process_input_buffer(TranslationUnit& translation_unit) cons
     }
 
     clang::SourceLocation current_location = tok.getLocation();
-    Dout(dc::notice, "current_location = " << print_source_location(current_location));
 
     if (!source_manager_.isInFileID(current_location, translation_unit.file_id()))
     {
@@ -112,12 +111,14 @@ void ClangFrontend::process_input_buffer(TranslationUnit& translation_unit) cons
       char const* tokenName = clang::tok::getTokenName(tok.getKind());
       std::string spelling = pp.getSpelling(tok);
 
+#if 0
       Dout(dc::notice, "Token(External): "
              << ", Kind: " << tokenName << " (" << tok.getKind() << ")"
              << ", Text: '" << buf2str(spelling.data(), spelling.size()) << "'");
       clang::SourceLocation ExpansionLoc = source_manager_.getExpansionLoc(current_location);
       Dout(dc::notice, "ExpansionLoc = " << print_source_location(ExpansionLoc));
       Dout(dc::notice, "spelling_location = " << print_source_location(spelling_location));
+#endif
 
       continue; // Skip gap calculation for this token.
     }

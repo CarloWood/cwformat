@@ -306,6 +306,30 @@ void TranslationUnit::add_input_token(clang::CharSourceRange char_source_range, 
   add_input_token(begin_offset, end_offset - begin_offset, token);
 }
 
+#if 0
+// Insert token0 followed by token1 by searching the gap produced by token1 backwards, looking for the last occurence of token0 which must be a fixed string.
+void TranslationUnit::add_input_tokens(char const* fixed_string, PPToken const& token0, clang::SourceLocation token1_location, PPToken const& token1)
+{
+  DoutEntering(dc::notice, "TranslationUnit::add_input_tokens(" << debug::print_string(fixed_string) << ", " << print_token(token0) << ", " <<
+      print_source_location(token1_location) << ", " << print_token(token1));
+
+  // Get offset and length of token1.
+  auto [token1_offset, token1_length] = clang_frontend_.measure_token_length(token1_location);
+
+  // Get the gap produced by token1.
+  offset_type gap_start = last_offset_;
+  size_t gap_length = token1_offset - gap_start;
+  auto gap_text = source_file_.span(gap_start, gap_length);
+
+  // Analyse the gap.
+  CodeScanner scanner(gap_text);
+
+  // Create an iterator that points one passed the end of the gap.
+  CodeScanner::iterator iter(scanner, token1_offset);
+  --iter;
+}
+#endif
+
 void TranslationUnit::print(std::ostream& os) const
 {
   os << "// TranslationUnit: " << name() << "\n";

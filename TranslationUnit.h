@@ -74,6 +74,8 @@ class TranslationUnit : public NoaContainer COMMA_CWDEBUG_ONLY(public Translatio
       last_token_was_function_macro_invocation_name_ = true;
   }
 
+  //void add_input_tokens(char const* fixed_string, PPToken const& token0, clang::SourceLocation token1_location, PPToken const& token1);
+
   void add_input_token(clang::CharSourceRange char_source_range, PPToken const& token);
 
   // Append a token without allowing whitespace (except backslash-newlines).
@@ -124,7 +126,7 @@ void TranslationUnit::add_input_token(offset_type token_offset, size_t token_len
   // All tokens in the source file must be processed in the order the appear in the file.
   ASSERT(token_offset >= last_offset_);
 
-  auto token_view = source_file_.span(token_offset, token_length);
+  auto token_sv = source_file_.span(token_offset, token_length);
 
   if (ProcessGap)
   {
@@ -133,8 +135,8 @@ void TranslationUnit::add_input_token(offset_type token_offset, size_t token_len
   }
 
   // Create an InputToken.
-  Dout(dc::notice, "Adding " << print_token(token) << " `" << buf2str(token_view) << "`.");
-  input_tokens_.emplace_back(token, token_view);
+  Dout(dc::notice, "Adding " << print_token(token) << " `" << buf2str(token_sv) << "`.");
+  input_tokens_.emplace_back(token, token_sv);
 
   // Update last_offset to the position after the current token.
   last_offset_ = token_offset + token_length;
