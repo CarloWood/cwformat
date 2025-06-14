@@ -71,7 +71,7 @@ target_link_libraries(cwformat
 add_subdirectory(enchantum)
 
 add_executable(scantest
-  scantest.cpp
+  scantest.cxx
   CodeScanner.cxx
 )
 
