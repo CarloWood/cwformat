@@ -56,7 +56,7 @@ void TranslationUnit::eof()
 void TranslationUnit::append_input_token(size_t token_length, PPToken const& token)
 {
   DoutEntering(dc::notice,
-    "TranslationUnit::append_input_token(" << token_length << ", " << print_token(token) << ")");
+    "TranslationUnit::append_input_token(" << token_length << ", " << print_item(token) << ")");
 
   // We are appending directly after the last token.
   offset_type const token_offset = last_offset_;
@@ -293,7 +293,7 @@ std::pair<TranslationUnit::offset_type, size_t> TranslationUnit::process_gap(off
 void TranslationUnit::add_input_token(clang::CharSourceRange char_source_range, PPToken const& token)
 {
   DoutEntering(dc::notice,
-    "TranslationUnit::add_input_token(" << print_char_source_range(char_source_range) << ", " << print_token(token) << ")");
+    "TranslationUnit::add_input_token(" << print_item(char_source_range) << ", " << print_item(token) << ")");
 
   clang::SourceManager const& source_manager = clang_frontend_.source_manager();
   offset_type begin_offset = source_manager.getFileOffset(char_source_range.getBegin());
@@ -310,8 +310,8 @@ void TranslationUnit::add_input_token(clang::CharSourceRange char_source_range, 
 // Insert token0 followed by token1 by searching the gap produced by token1 backwards, looking for the last occurence of token0 which must be a fixed string.
 void TranslationUnit::add_input_tokens(char const* fixed_string, PPToken const& token0, clang::SourceLocation token1_location, PPToken const& token1)
 {
-  DoutEntering(dc::notice, "TranslationUnit::add_input_tokens(" << debug::print_string(fixed_string) << ", " << print_token(token0) << ", " <<
-      print_source_location(token1_location) << ", " << print_token(token1));
+  DoutEntering(dc::notice, "TranslationUnit::add_input_tokens(" << debug::print_string(fixed_string) << ", " << print_item(token0) << ", " <<
+      print_item(token1_location) << ", " << print_item(token1));
 
   // Get offset and length of token1.
   auto [token1_offset, token1_length] = clang_frontend_.measure_token_length(token1_location);

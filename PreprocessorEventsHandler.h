@@ -34,7 +34,32 @@ struct PreprocessorEvent
   PreprocessorEvent(EventType T, std::string N, clang::SourceRange L) : Type(T), Name(std::move(N)), Location(L) {}
 };
 
-class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationUnitRef
+#ifdef CWDEBUG
+// More print_item overloads.
+struct PrintItem
+{
+  auto print_item(clang::PPCallbacks::ConditionValueKind ConditionValue)
+  {
+    return utils::to_string(ConditionValue);
+  }
+
+  std::string print_item(clang::MacroDefinition const& macro_definition)
+  {
+    clang::MacroInfo* macro_info = macro_definition.getMacroInfo();
+    if (!macro_info)
+      return "<unknown/not-defined>";
+
+    NAMESPACE_DEBUG::MacroInfo mi(translation_unit(), *macro_info);
+    std::ostringstream oss;
+    oss << mi;
+    return oss.str();
+  }
+
+  virtual TranslationUnit const& translation_unit() const = 0;
+};
+#endif
+
+class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationUnitRef COMMA_CWDEBUG_ONLY(public PrintItem)
 {
  private:
   bool enabled_;        // True if the callbacks are enabled. If false, all callbacks should be ignored.
@@ -116,8 +141,8 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
     }
 
     DoutEntering(dc::notice,
-      "PreprocessorEventsHandler::InclusionDirective(" << print_source_location(HashLoc) << ", " << print_token(IncludeTok) << ", " << FileName
-                                                       << ", " << std::boolalpha << IsAngled << ", " << print_char_source_range(FilenameRange)
+      "PreprocessorEventsHandler::InclusionDirective(" << print_item(HashLoc) << ", " << print_item(IncludeTok) << ", " << FileName
+                                                       << ", " << std::boolalpha << IsAngled << ", " << print_item(FilenameRange)
                                                        << ", " << File << ", " << SearchPath << ", " << RelativePath << ", " << SuggestedModule
                                                        << ", " << std::boolalpha << ModuleImported << ", " << FileType << ")");
 
@@ -143,7 +168,7 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
     }
 
     DoutEntering(
-      dc::notice, "PreprocessorEventsHandler::MacroDefined(" << print_token(MacroNameTok) << ", " << print_macro_directive(*MD) << ")");
+      dc::notice, "PreprocessorEventsHandler::MacroDefined(" << print_item(MacroNameTok) << ", " << print_item(*MD) << ")");
 
     // Get the data related to this macro definition.
     clang::MacroInfo const* macro_info = MD->getMacroInfo();
@@ -257,7 +282,7 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
     FileID FID, LexedFileChangeReason Reason, CharacteristicKind FileType, FileID PrevFID, SourceLocation Loc) override
   {
     DoutEntering(dc::notice, "PreprocessorEventsHandler::LexedFileChanged(" <<
-        print_file_id(FID) << ", " << Reason << ", " << FileType << ", " << print_file_id(PrevFID) << ", " << print_source_location(Loc) << ")");
+        print_item(FID) << ", " << Reason << ", " << FileType << ", " << print_item(PrevFID) << ", " << print_item(Loc) << ")");
 
     ASSERT(Reason == LexedFileChangeReason::EnterFile || Reason == LexedFileChangeReason::ExitFile);    // When does this happen?
     // Disable certain functionality if we're not in the current TU.
@@ -275,7 +300,7 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
   void FileSkipped(FileEntryRef const& SkippedFile, Token const& FilenameTok, CharacteristicKind FileType) override
   {
     DoutEntering(dc::notice, "PreprocessorEventsHandler::FileSkipped(" <<
-        SkippedFile.getName() << ", " << print_token(FilenameTok) << ", " << FileType);
+        SkippedFile.getName() << ", " << print_item(FilenameTok) << ", " << FileType);
   }
 
   /// Callback invoked whenever the preprocessor cannot find a file for an
@@ -476,11 +501,11 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
 
 #ifdef CWDEBUG
     // Range refers to the macro invocation in the source file.
-    DoutEntering(dc::notice|continued_cf, "PreprocessorEventsHandler::MacroExpands(" << print_token(MacroNameTok) << ", MD, " << print_source_range(Range));
+    DoutEntering(dc::notice|continued_cf, "PreprocessorEventsHandler::MacroExpands(" << print_item(MacroNameTok) << ", MD, " << print_item(Range));
     for (unsigned int arg = 0; arg < Args->getNumMacroArguments(); ++arg)
     {
       Token arg_token = *Args->getUnexpArgument(arg);
-      Dout(dc::continued, ", " << print_token(arg_token) << " (length: " << arg_token.getLength() << ")");
+      Dout(dc::continued, ", " << print_item(arg_token) << " (length: " << arg_token.getLength() << ")");
     }
     Dout(dc::finish, ")");
 #endif
@@ -523,35 +548,12 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
   /// 'endif').
   void SourceRangeSkipped(SourceRange Range, SourceLocation EndifLoc) override { ASSERT(!enabled_);; }
 
-  auto print_argument(Token const& token)
-  {
-    return print_token(token);
-  }
-
-  auto print_argument(SourceRange const& source_range)
-  {
-    return print_source_range(source_range);
-  }
-
-  auto print_argument(clang::FileID file_id)
-  {
-    return print_file_id(file_id);
-  }
-
-  auto print_argument(clang::SourceLocation loc)
-  {
-    return print_source_location(loc);
-  }
-
-  auto print_argument(clang::CharSourceRange const& char_range)
-  {
-    return print_char_source_range(char_range);
-  }
-
-  auto print_argument(clang::MacroDirective const& macro_directive)
-  {
-    return print_macro_directive(macro_directive);
-  }
+#ifdef CWDEBUG
+  TranslationUnit const& translation_unit() const override { return translation_unit_; }
+  // Must bring these into this scope.
+  using PrintItem::print_item;
+  using TranslationUnitRef::print_item;
+#endif
 
   // Adds PPToken::directive_hash followed by the PPToken::directive at DirectiveLocation.
   template<typename ...Args>
@@ -567,8 +569,8 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
 #ifdef CWDEBUG
     int debug_indentation = 2;
     LibcwDoutScopeBegin(DEBUGCHANNELS, ::libcwd::libcw_do, dc::notice)
-    LibcwDoutStream << "Entering PreprocessorEventsHandler::" << func_name << "(" << print_source_location(DirectiveLocation);
-    ( (LibcwDoutStream << ", " << print_argument(std::forward<Args>(args))), ... );
+    LibcwDoutStream << "Entering PreprocessorEventsHandler::" << func_name << "(" << print_item(DirectiveLocation);
+    ( (LibcwDoutStream << ", " << print_item(std::forward<Args>(args))), ... );
     LibcwDoutStream << ")";
     LibcwDoutScopeEnd;
     NAMESPACE_DEBUG::Indent debug_indent(debug_indentation);
@@ -587,7 +589,7 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
   ///
   void If(SourceLocation DirectiveLocation, SourceRange ConditionRange, ConditionValueKind ConditionValue) override
   {
-    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("If", ConditionRange));
+    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("If", ConditionRange, ConditionValue));
   }
 
   /// Hook called whenever an \#elif is seen.
@@ -597,7 +599,7 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
   /// \param IfLoc the source location of the \#if/\#ifdef/\#ifndef directive.
   void Elif(SourceLocation DirectiveLocation, SourceRange ConditionRange, ConditionValueKind ConditionValue, SourceLocation IfLoc) override
   {
-    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Elif"));
+    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Elif", ConditionRange, ConditionValue, IfLoc));
   }
 
   /// Hook called whenever an \#ifdef is seen.
@@ -606,7 +608,9 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
   /// \param MD The MacroDefinition if the name was a macro, null otherwise.
   void Ifdef(SourceLocation DirectiveLocation, Token const& MacroNameTok, MacroDefinition const& MD) override
   {
-    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Ifdef", MacroNameTok));
+    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Ifdef", MacroNameTok, MD));
+
+    translation_unit_.add_input_token(MacroNameTok.getLocation(), PPToken::macro_invocation_name);
   }
 
   /// Hook called whenever an \#elifdef branch is taken.
@@ -615,7 +619,7 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
   /// \param MD The MacroDefinition if the name was a macro, null otherwise.
   void Elifdef(SourceLocation DirectiveLocation, Token const& MacroNameTok, MacroDefinition const& MD) override
   {
-    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Elifdef"));
+    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Elifdef", MacroNameTok, MD));
   }
 
   /// Hook called whenever an \#elifdef is skipped.
@@ -624,7 +628,7 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
   /// \param IfLoc the source location of the \#if/\#ifdef/\#ifndef directive.
   void Elifdef(SourceLocation DirectiveLocation, SourceRange ConditionRange, SourceLocation IfLoc) override
   {
-    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Elifdef"));
+    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Elifdef", ConditionRange, IfLoc));
   }
 
   /// Hook called whenever an \#ifndef is seen.
@@ -633,7 +637,7 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
   /// \param MD The MacroDefiniton if the name was a macro, null otherwise.
   void Ifndef(SourceLocation DirectiveLocation, Token const& MacroNameTok, MacroDefinition const& MD) override
   {
-    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Ifndef"));
+    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Ifndef", MacroNameTok, MD));
   }
 
   /// Hook called whenever an \#elifndef branch is taken.
@@ -642,7 +646,7 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
   /// \param MD The MacroDefinition if the name was a macro, null otherwise.
   void Elifndef(SourceLocation DirectiveLocation, Token const& MacroNameTok, MacroDefinition const& MD) override
   {
-    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Elifndef"));
+    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Elifndef", MacroNameTok, MD));
   }
 
   /// Hook called whenever an \#elifndef is skipped.
@@ -651,7 +655,7 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
   /// \param IfLoc the source location of the \#if/\#ifdef/\#ifndef directive.
   void Elifndef(SourceLocation DirectiveLocation, SourceRange ConditionRange, SourceLocation IfLoc) override
   {
-    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Elifndef"));
+    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Elifndef", ConditionRange, IfLoc));
   }
 
   /// Hook called whenever an \#else is seen.
@@ -659,7 +663,7 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
   /// \param IfLoc the source location of the \#if/\#ifdef/\#ifndef directive.
   void Else(SourceLocation DirectiveLocation, SourceLocation IfLoc) override
   {
-    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Else"));
+    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Else", IfLoc));
   }
 
   /// Hook called whenever an \#endif is seen.
@@ -667,6 +671,6 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
   /// \param IfLoc the source location of the \#if/\#ifdef/\#ifndef directive.
   void Endif(SourceLocation DirectiveLocation, SourceLocation IfLoc) override
   {
-    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Endif"));
+    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Endif", IfLoc));
   }
 };

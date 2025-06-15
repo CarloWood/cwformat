@@ -54,7 +54,7 @@ class TranslationUnit : public NoaContainer COMMA_CWDEBUG_ONLY(public Translatio
   // Add a given clang::Token (possibly adding preceding whitespace first).
   void add_input_token(clang::Token const& token)
   {
-    DoutEntering(dc::notice, "TranslationUnit::add_input_token(" << print_token(token) << ")");
+    DoutEntering(dc::notice, "TranslationUnit::add_input_token(" << print_item(token) << ")");
 
     clang::SourceLocation token_location = token.getLocation();
 
@@ -65,7 +65,7 @@ class TranslationUnit : public NoaContainer COMMA_CWDEBUG_ONLY(public Translatio
 
   void add_input_token(clang::SourceLocation token_location, PPToken const& token)
   {
-    DoutEntering(dc::notice, "TranslationUnit::add_input_token(" << print_source_location(token_location) << ", " << print_token(token) << ")");
+    DoutEntering(dc::notice, "TranslationUnit::add_input_token(" << print_item(token_location) << ", " << print_item(token) << ")");
 
     auto [token_offset, token_length] = clang_frontend_.measure_token_length(token_location);
     add_input_token(token_offset, token_length, token);
@@ -121,7 +121,7 @@ requires std::is_same_v<TOKEN, clang::Token> || std::is_same_v<TOKEN, PPToken>
 void TranslationUnit::add_input_token(offset_type token_offset, size_t token_length, TOKEN const& token, bool ProcessGap)
 {
   DoutEntering(dc::notice,
-    "TranslationUnit::add_input_token(" << token_offset << ", " << token_length << ", " << print_token(token) << ")");
+    "TranslationUnit::add_input_token(" << token_offset << ", " << token_length << ", " << print_item(token) << ")");
 
   // All tokens in the source file must be processed in the order the appear in the file.
   ASSERT(token_offset >= last_offset_);
@@ -135,7 +135,7 @@ void TranslationUnit::add_input_token(offset_type token_offset, size_t token_len
   }
 
   // Create an InputToken.
-  Dout(dc::notice, "Adding " << print_token(token) << " `" << buf2str(token_sv) << "`.");
+  Dout(dc::notice, "Adding " << print_item(token) << " `" << buf2str(token_sv) << "`.");
   input_tokens_.emplace_back(token, token_sv);
 
   // Update last_offset to the position after the current token.

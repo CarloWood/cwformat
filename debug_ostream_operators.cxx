@@ -16,12 +16,12 @@ namespace debug {
 void MacroInfo::print_on(std::ostream& os) const
 {
   os << '{';
-  os << "Location:" << print_source_location(macro_info_.getDefinitionLoc()) <<
-      ", EndLocation:" << print_source_location(macro_info_.getDefinitionEndLoc()) <<
+  os << "Location:" << print_item(macro_info_.getDefinitionLoc()) <<
+      ", EndLocation:" << print_item(macro_info_.getDefinitionEndLoc()) <<
       ", ParameterList:" << utils::print_range(macro_info_.param_begin(), macro_info_.param_end(),
           [this](std::ostream& os, clang::IdentifierInfo* identifier_info){ os << IdentifierInfo{translation_unit_, *identifier_info}; }) <<
       ", ReplacementTokens:" << utils::print_range(macro_info_.tokens_begin(), macro_info_.tokens_end(),
-          [this](std::ostream& os, clang::Token const& token){ os << print_token(token); }) <<
+          [this](std::ostream& os, clang::Token const& token){ os << print_item(token); }) <<
       ", NumParameters:" << macro_info_.getNumParams() <<
       ", NumReplacementTokens:" << macro_info_.getNumTokens() <<
       ", DefinitionLength:" << macro_info_.getDefinitionLength(translation_unit_.clang_frontend().source_manager()) <<
@@ -30,7 +30,7 @@ void MacroInfo::print_on(std::ostream& os) const
       ", IsGNUVarargs:" << macro_info_.isGNUVarargs() <<
       ", IsBuiltinMacro:" << macro_info_.isBuiltinMacro() <<
       ", HasCommaPasting:" << macro_info_.hasCommaPasting() <<
-      ", IsDisabled" << !macro_info_.isEnabled() <<
+      ", IsDisabled:" << !macro_info_.isEnabled() <<
       ", IsUsed:" << macro_info_.isUsed() <<
       ", IsAllowRedefinitionsWithoutWarning:" << macro_info_.isAllowRedefinitionsWithoutWarning() <<
       ", IsWarnIfUnused:" << macro_info_.isWarnIfUnused() <<

@@ -124,14 +124,14 @@ class TranslationUnitRefImpl
 
 #ifdef CWDEBUG
  public:
-  debug::FileID print_file_id(clang::FileID file_id) const { return {translation_unit_, file_id}; }
-  debug::SourceLocation print_source_location(clang::SourceLocation loc) const { return {translation_unit_, loc}; }
-  debug::SourceRange print_source_range(clang::SourceRange const& range) const { return {translation_unit_, range}; }
-  debug::CharSourceRange print_char_source_range(clang::CharSourceRange const& char_range) const { return {translation_unit_, char_range}; }
-  debug::Token print_token(clang::Token const& token) const { return {translation_unit_, token}; }
-  debug::MacroDirective print_macro_directive(clang::MacroDirective const& macro_directive) const { return {translation_unit_, macro_directive}; }
-  // Allow calling print_token with a PPToken...
-  PPToken const& print_token(PPToken const& token) const { return token; }
+  debug::FileID print_item(clang::FileID file_id) const { return {translation_unit_, file_id}; }
+  debug::SourceLocation print_item(clang::SourceLocation loc) const { return {translation_unit_, loc}; }
+  debug::SourceRange print_item(clang::SourceRange const& range) const { return {translation_unit_, range}; }
+  debug::CharSourceRange print_item(clang::CharSourceRange const& char_range) const { return {translation_unit_, char_range}; }
+  debug::Token print_item(clang::Token const& token) const { return {translation_unit_, token}; }
+  debug::MacroDirective print_item(clang::MacroDirective const& macro_directive) const { return {translation_unit_, macro_directive}; }
+  // Allow calling print_item with a PPToken...
+  PPToken const& print_item(PPToken const& token) const { return token; }
 #endif
 };
 
