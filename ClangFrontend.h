@@ -129,7 +129,8 @@ struct PreprocessorOptions : public clang::PreprocessorOptions
 {
   PreprocessorOptions()
   {
-    UsePredefines = true; //false; // Do not load builtin definitions/macros.
+    UsePredefines = true;                       // Load builtin definitions/macros.
+    RetainExcludedConditionalBlocks = true;     // Parse excluded #if-#endif / #else-#endif conditional blocks in the main file.
     // Example options:
     //AddMacroDef("NDEBUG");
   }

@@ -63,6 +63,7 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
 {
  private:
   bool enabled_;        // True if the callbacks are enabled. If false, all callbacks should be ignored.
+  uint32_t current_macro_invocation_offset_;    // The offset into the main file of the current macro being processed as a result of a call to MacroExpands.
 
  public:
   using CharacteristicKind = clang::SrcMgr::CharacteristicKind;
@@ -496,28 +497,41 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
       return;
     }
 
+    SourceLocation macro_name_token_location = MacroNameTok.getLocation();
+    clang::SourceManager const& source_manager = translation_unit_.clang_frontend().source_manager();
+    TranslationUnit::offset_type macro_name_offset = source_manager.getDecomposedExpansionLoc(macro_name_token_location).second;
+    if (macro_name_offset == current_macro_invocation_offset_)
+    {
+      // This is a recursive expansion.
+      return;
+    }
+    current_macro_invocation_offset_ = macro_name_offset;
+
     // Get the data related to this macro definition.
     clang::MacroInfo const* macro_info = MD.getMacroInfo();
 
 #ifdef CWDEBUG
     // Range refers to the macro invocation in the source file.
-    DoutEntering(dc::notice|continued_cf, "PreprocessorEventsHandler::MacroExpands(" << print_item(MacroNameTok) << ", MD, " << print_item(Range));
-    for (unsigned int arg = 0; arg < Args->getNumMacroArguments(); ++arg)
+    DoutEntering(dc::notice|continued_cf, "PreprocessorEventsHandler::MacroExpands(MacroNameTok:" << print_item(MacroNameTok) <<
+        ", MacroDefinition:" << print_item(MD) << ", Range:" << print_item(Range) << ", Args->{");
+    char const* separator = "";
+    for (unsigned int arg = 0; Args && arg < Args->getNumMacroArguments(); ++arg)
     {
       Token arg_token = *Args->getUnexpArgument(arg);
-      Dout(dc::continued, ", " << print_item(arg_token) << " (length: " << arg_token.getLength() << ")");
+      Dout(dc::continued, separator << print_item(arg_token) << " (length: " << arg_token.getLength() << ")");
+      separator = ", ";
     }
-    Dout(dc::finish, ")");
+    Dout(dc::finish, "})");
 #endif
 
     // Add the macro name.
     if (!macro_info->isFunctionLike())
     {
-      translation_unit_.add_input_token(MacroNameTok.getLocation(), PPToken::macro_invocation_name);
+      translation_unit_.add_input_token(macro_name_token_location, PPToken::macro_invocation_name);
       return;
     }
 
-    translation_unit_.add_input_token(MacroNameTok.getLocation(), PPToken::function_macro_invocation_name);
+    translation_unit_.add_input_token(macro_name_token_location, PPToken::function_macro_invocation_name);
   }
 
   /// Hook called whenever a macro \#undef is seen.
@@ -557,13 +571,13 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
 
   // Adds PPToken::directive_hash followed by the PPToken::directive at DirectiveLocation.
   template<typename ...Args>
-  void add_directive(SourceLocation DirectiveLocation COMMA_CWDEBUG_ONLY(char const* func_name, Args&&... args))
+  bool add_directive(SourceLocation DirectiveLocation COMMA_CWDEBUG_ONLY(char const* func_name, Args&&... args))
   {
     if (!enabled_)
     {
       // This directive should not be ignored if it is used in the current TU.
       ASSERT(!translation_unit_.contains(DirectiveLocation));
-      return;
+      return false;
     }
 
 #ifdef CWDEBUG
@@ -580,6 +594,8 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
     // The very first non-whitespace or comment should be the hash that belongs to the directive.
     translation_unit_.add_input_token("#", PPToken::directive_hash);
     translation_unit_.add_input_token(DirectiveLocation, PPToken::directive);
+
+    return true;
   }
 
   /// Hook called whenever an \#if is seen.
@@ -608,7 +624,8 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
   /// \param MD The MacroDefinition if the name was a macro, null otherwise.
   void Ifdef(SourceLocation DirectiveLocation, Token const& MacroNameTok, MacroDefinition const& MD) override
   {
-    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Ifdef", MacroNameTok, MD));
+    if (!add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Ifdef", MacroNameTok, MD)))
+      return;
 
     translation_unit_.add_input_token(MacroNameTok.getLocation(), PPToken::macro_invocation_name);
   }
