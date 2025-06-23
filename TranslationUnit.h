@@ -6,6 +6,7 @@
 #include "NoaContainer.h"
 #include "clang/Basic/SourceLocation.h"
 #include <memory>
+#include <map>
 #ifdef CWDEBUG
 #include <libcwd/buf2str.h>
 #endif
@@ -25,7 +26,7 @@ class SourceManager;
 class TranslationUnit : public NoaContainer COMMA_CWDEBUG_ONLY(public TranslationUnitRef)
 {
  public:
-  using offset_type = unsigned int;
+  using offset_type = unsigned int;                     // Must be the same as ClangFrontend::offset_type.
 
  private:
   ClangFrontend& clang_frontend_;
@@ -35,17 +36,26 @@ class TranslationUnit : public NoaContainer COMMA_CWDEBUG_ONLY(public Translatio
   offset_type last_offset_;                             // The offset of the last InputToken that was added, or zero if none were added yet.
   std::vector<InputToken> input_tokens_;
   bool last_token_was_function_macro_invocation_name_ = false;
-
-#ifdef CWDEBUG
   std::string name_;
-#endif
+  using macro_invocations_type = std::map<offset_type, std::pair<size_t, PPToken>>;
+  macro_invocations_type macro_invocations_;
 
  public:
-  TranslationUnit(ClangFrontend& clang_frontend, SourceFile const& source_file COMMA_CWDEBUG_ONLY(std::string const& name));
+  TranslationUnit(ClangFrontend& clang_frontend, SourceFile const& source_file, std::string const& name);
   ~TranslationUnit();
 
   void process();
   void eof();
+
+  void queue_macro_invocation(offset_type token_offset, size_t token_length, PPToken token);
+
+  // Returns the macro PPToken if `offset` is the offset of the next queued macro.
+  std::optional<PPToken> is_next_queued_macro(offset_type offset) const
+  {
+    if (!macro_invocations_.empty() && macro_invocations_.begin()->first == offset)
+      return macro_invocations_.begin()->second.second;
+    return {};
+  }
 
   template<typename TOKEN>
   requires std::is_same_v<TOKEN, clang::Token> || std::is_same_v<TOKEN, PPToken>
@@ -69,9 +79,6 @@ class TranslationUnit : public NoaContainer COMMA_CWDEBUG_ONLY(public Translatio
 
     auto [token_offset, token_length] = clang_frontend_.measure_token_length(token_location);
     add_input_token(token_offset, token_length, token);
-
-    if (token.kind_ == PPToken::function_macro_invocation_name)
-      last_token_was_function_macro_invocation_name_ = true;
   }
 
   //void add_input_tokens(char const* fixed_string, PPToken const& token0, clang::SourceLocation token1_location, PPToken const& token1);
@@ -88,6 +95,8 @@ class TranslationUnit : public NoaContainer COMMA_CWDEBUG_ONLY(public Translatio
     append_input_token(token_length, token);
   }
 
+  void lex_source_range(clang::SourceRange const& token_range);
+
   SourceFile const& source_file() const { return source_file_; }
   clang::FileID file_id() const { return file_id_; }
   clang::Preprocessor& get_pp() const { return *preprocessor_; }
@@ -101,9 +110,7 @@ class TranslationUnit : public NoaContainer COMMA_CWDEBUG_ONLY(public Translatio
     return clang_frontend_.source_manager().getFileID(Loc) == file_id_;
   }
 
-#ifdef CWDEBUG
   std::string const& name() const { return name_; }
-#endif
   void print(std::ostream& os) const;
 
  private:
@@ -140,4 +147,11 @@ void TranslationUnit::add_input_token(offset_type token_offset, size_t token_len
 
   // Update last_offset to the position after the current token.
   last_offset_ = token_offset + token_length;
+
+  // Remember it if we just processed a macro invocation name.
+  if constexpr (std::is_same_v<TOKEN, PPToken>)
+  {
+    if (token.kind_ == PPToken::function_macro_invocation_name)
+      last_token_was_function_macro_invocation_name_ = true;
+  }
 }

@@ -2,6 +2,7 @@
 #include "TranslationUnit.h"
 #include "CodeScanner.h"
 #include "utils/AIAlert.h"
+#include "utils/debug_ostream_operators.h"
 #include <clang/Lex/Preprocessor.h>
 #include "ClangFrontend.h"
 #include "InputToken.h"
@@ -14,8 +15,8 @@
 #endif
 #include "debug.h"
 
-TranslationUnit::TranslationUnit(ClangFrontend& clang_frontend, SourceFile const& source_file COMMA_CWDEBUG_ONLY(std::string const& name)) :
-    CWDEBUG_ONLY(TranslationUnitRef(*this), ) clang_frontend_(clang_frontend), source_file_(source_file) COMMA_CWDEBUG_ONLY(name_(name))
+TranslationUnit::TranslationUnit(ClangFrontend& clang_frontend, SourceFile const& source_file, std::string const& name) :
+    CWDEBUG_ONLY(TranslationUnitRef(*this), ) clang_frontend_(clang_frontend), source_file_(source_file), name_(name)
 {
   clang_frontend_.begin_source_file(source_file, *this);
 }
@@ -81,6 +82,31 @@ void TranslationUnit::append_input_token(size_t token_length, PPToken const& tok
   add_input_token(last_offset_, token_length, token, false);
 }
 
+void TranslationUnit::queue_macro_invocation(offset_type token_offset, size_t token_length, PPToken token)
+{
+  DoutEntering(dc::notice, "TranslationUnit::queue_macro_invocation(" << token_offset << ", " << token_length << ", " << token << ")");
+
+  clang::SourceManager const& source_manager = clang_frontend_.source_manager();
+
+#ifdef CWDEBUG
+  std::string_view macro_name_string = "<<<<INVALID BUFFER>>>>";
+  bool CharDataInvalid = false;
+  clang::SrcMgr::SLocEntry const& Entry = source_manager.getSLocEntry(file_id_, &CharDataInvalid);
+  if (!CharDataInvalid && Entry.isFile())
+  {
+    std::optional<llvm::MemoryBufferRef> Buffer =
+      Entry.getFile().getContentCache().getBufferOrNone(source_manager.getDiagnostics(), source_manager.getFileManager(), {});
+    if (Buffer)
+      macro_name_string = std::string_view{Buffer->getBufferStart() + token_offset, token_length};
+  }
+  Dout(dc::notice, "Queuing invocation of macro \"" << macro_name_string << "\".");
+#endif
+
+  auto ibp = macro_invocations_.try_emplace(token_offset, token_length, token);
+  // We should only get here for each token_offset once.
+  ASSERT(ibp.second);
+}
+
 // Finds all whitespace, C-comment and C++-comment character sequences (all possibly having backslash-newlines inserted)
 // up till but not including current_offset (which is where a new token was found that isn't either of those three).
 // If fixed_string is non-null, then this function stops when it encounters this string (not inside a comment) and
@@ -102,8 +128,20 @@ std::pair<TranslationUnit::offset_type, size_t> TranslationUnit::process_gap(off
     offset_type gap_start = last_offset_;
     size_t gap_length = current_offset - gap_start;
     auto gap_text = source_file_.span(gap_start, gap_length);
+    size_t fixed_string_length = fixed_string ? std::strlen(fixed_string) : 0;
 
-    Dout(dc::notice, "Skipped : from offset " << gap_start << ", length: " << gap_length << "; text: '" << buf2str(gap_text) << "'");
+#ifdef CWDEBUG
+    Dout(dc::notice|continued_cf, "Skipped : from offset " << gap_start << ", length: " << gap_length << "; text: '");
+    if (fixed_string)
+    {
+      size_t pos = gap_text.find(fixed_string);
+      ASSERT(pos != std::string_view::npos);
+      Dout(dc::continued, utils::print_c_escaped(gap_text.substr(0, pos + fixed_string_length)) << "...");
+    }
+    else
+      Dout(dc::continued, buf2str(gap_text));
+    Dout(dc::finish, "'");
+#endif
 
     // Check if we still have to decode the macro arguments of a previous function-like macro invocation.
     if (last_token_was_function_macro_invocation_name_)
@@ -144,7 +182,11 @@ std::pair<TranslationUnit::offset_type, size_t> TranslationUnit::process_gap(off
         CodeScanner::iterator arg_end(scanner, (++ptr)->offset_);
         --arg_end;
         // Add '<--gap{N+1}-->' and 'arg{N}'.
-        add_input_token<PPToken>(gap_start + arg_start.offset(), arg_end - arg_start + 1, {PPToken::function_macro_invocation_arg});
+        clang::SourceManager const& source_manager = clang_frontend_.source_manager();
+        clang::SourceLocation arg_start_loc = source_manager.getComposedLoc(file_id_, gap_start + arg_start.offset());
+        clang::SourceLocation arg_end_loc = arg_start_loc.getLocWithOffset(arg_end.offset() - arg_start.offset());
+        //add_input_token<PPToken>(gap_start + arg_start.offset(), arg_end - arg_start + 1, {PPToken::function_macro_invocation_arg});
+        clang_frontend_.lex_source_range(*this, {arg_start_loc, arg_end_loc});
       }
 
       // Re-initialize the remaining gap before falling through.
@@ -167,7 +209,6 @@ std::pair<TranslationUnit::offset_type, size_t> TranslationUnit::process_gap(off
     };
 
     char expected;
-    size_t fixed_string_length;
     int j;
     offset_type token_start;
     LookingForType looking_for = any;
@@ -198,7 +239,6 @@ std::pair<TranslationUnit::offset_type, size_t> TranslationUnit::process_gap(off
               looking_for = comment_start;
             else if (fixed_string && c == fixed_string[0])      // Note that fixed_string, if non-null, is never empty.
             {
-              fixed_string_length = std::strlen(fixed_string);
               if (fixed_string_length == 1)
               {
                 std::pair<offset_type, size_t> result{gap_start + i, 1};
@@ -210,7 +250,17 @@ std::pair<TranslationUnit::offset_type, size_t> TranslationUnit::process_gap(off
               expected = fixed_string[j = 1];
             }
             else
+            {
+              auto front = macro_invocations_.begin();
+              if (front != macro_invocations_.end() && front->first == gap_start + i)
+              {
+                macro_invocations_type::value_type const& value = *front;
+                add_input_token(value.first, value.second.first, value.second.second, false);
+                macro_invocations_.erase(front);
+                return process_gap(current_offset, fixed_string);
+              }
               looking_for = error;
+            }
           }
           token_start = gap_start + i;
           break;
@@ -272,7 +322,7 @@ std::pair<TranslationUnit::offset_type, size_t> TranslationUnit::process_gap(off
       {
         // This gap contains a PPToken that should have been detected.
         gap_text.remove_prefix(i);
-        THROW_ALERT("Gap contains non-whitespace at [ERROR_LOCATION]", AIArgs("[ERROR_LOCATION]", libcwd::buf2str(gap_text)));
+        THROW_ALERT("Gap contains non-whitespace at [ERROR_LOCATION]", AIArgs("[ERROR_LOCATION]", utils::print_c_escaped(gap_text)));
       }
     }
     if (looking_for == more_whitespace)
@@ -329,6 +379,12 @@ void TranslationUnit::add_input_tokens(char const* fixed_string, PPToken const& 
   --iter;
 }
 #endif
+
+void TranslationUnit::lex_source_range(clang::SourceRange const& token_range)
+{
+  DoutEntering(dc::notice, "TranslationUnit::lex_source_range(" << debug::SourceRange{*this, token_range} << ")");
+  clang_frontend_.lex_source_range(*this, token_range);
+}
 
 void TranslationUnit::print(std::ostream& os) const
 {

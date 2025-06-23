@@ -394,7 +394,7 @@ void process_filename(ClangFrontend& clang_frontend, RandomNumber& rn, std::file
   // Create a SourceFile object from the input buffer.
   SourceFile const source_file(input_filename_str, full_path, std::move(input_buffer));
   // Create a TranslationUnit object to hold the result.
-  TranslationUnit translation_unit(clang_frontend, source_file COMMA_CWDEBUG_ONLY(input_filename_str));
+  TranslationUnit translation_unit(clang_frontend, source_file, input_filename_str);
 
   // --- 3. Process the SourceFile ---
   // output_stream_ptr is either &std::cout or &temp_ofile.

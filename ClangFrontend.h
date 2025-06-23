@@ -181,6 +181,9 @@ class OptionsBase
 
 class ClangFrontend : public OptionsBase
 {
+ public:
+  using offset_type = unsigned int;                     // Must be the same as TranslationUnit::offset_type.
+
  private:
   // Diagnostics Infrastructure.
   //  DiagnosticConsumer diagnostic_consumer_;
@@ -222,6 +225,10 @@ class ClangFrontend : public OptionsBase
   {
     return clang::Lexer::getSourceText(range, source_manager_, lang_options_);
   }
+
+  void lex_source_range(TranslationUnit& translation_unit, clang::SourceRange range);
+  void lex_source_range(TranslationUnit& translation_unit, offset_type offset, size_t range_size);
+  void lex_source_range(TranslationUnit& translation_unit, char const* RangeLexStartPtr, size_t range_size, llvm::StringRef FileBuffer);
 
  private:
   static clang::TargetInfo* create_target_info(

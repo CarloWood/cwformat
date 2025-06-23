@@ -498,8 +498,14 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
     }
 
     SourceLocation macro_name_token_location = MacroNameTok.getLocation();
-    clang::SourceManager const& source_manager = translation_unit_.clang_frontend().source_manager();
-    TranslationUnit::offset_type macro_name_offset = source_manager.getDecomposedExpansionLoc(macro_name_token_location).second;
+
+    if (macro_name_token_location.isMacroID())
+    {
+      // We're not interested in invocations that happen inside another macro expansion.
+      return;
+    }
+
+    auto [macro_name_offset, macro_name_length] = translation_unit_.clang_frontend().measure_token_length(macro_name_token_location);
     if (macro_name_offset == current_macro_invocation_offset_)
     {
       // This is a recursive expansion.
@@ -524,14 +530,9 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
     Dout(dc::finish, "})");
 #endif
 
-    // Add the macro name.
-    if (!macro_info->isFunctionLike())
-    {
-      translation_unit_.add_input_token(macro_name_token_location, PPToken::macro_invocation_name);
-      return;
-    }
-
-    translation_unit_.add_input_token(macro_name_token_location, PPToken::function_macro_invocation_name);
+    // Queue macro invocation callbacks, because due a bug in clang they do not happen in source-order.
+    translation_unit_.queue_macro_invocation(macro_name_offset, macro_name_length,
+        macro_info->isFunctionLike() ? PPToken::function_macro_invocation_name : PPToken::macro_invocation_name);
   }
 
   /// Hook called whenever a macro \#undef is seen.
@@ -577,6 +578,7 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
     {
       // This directive should not be ignored if it is used in the current TU.
       ASSERT(!translation_unit_.contains(DirectiveLocation));
+      // Note the main file, ignore this line.
       return false;
     }
 
@@ -595,6 +597,7 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
     translation_unit_.add_input_token("#", PPToken::directive_hash);
     translation_unit_.add_input_token(DirectiveLocation, PPToken::directive);
 
+    // Success.
     return true;
   }
 
@@ -605,7 +608,10 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
   ///
   void If(SourceLocation DirectiveLocation, SourceRange ConditionRange, ConditionValueKind ConditionValue) override
   {
-    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("If", ConditionRange, ConditionValue));
+    if (!add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("If", ConditionRange, ConditionValue)))
+      return;
+
+    translation_unit_.lex_source_range(ConditionRange);
   }
 
   /// Hook called whenever an \#elif is seen.
@@ -615,7 +621,10 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
   /// \param IfLoc the source location of the \#if/\#ifdef/\#ifndef directive.
   void Elif(SourceLocation DirectiveLocation, SourceRange ConditionRange, ConditionValueKind ConditionValue, SourceLocation IfLoc) override
   {
-    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Elif", ConditionRange, ConditionValue, IfLoc));
+    if (!add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Elif", ConditionRange, ConditionValue, IfLoc)))
+      return;
+
+    translation_unit_.lex_source_range(ConditionRange);
   }
 
   /// Hook called whenever an \#ifdef is seen.
@@ -627,6 +636,7 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
     if (!add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Ifdef", MacroNameTok, MD)))
       return;
 
+    // Add the macro name that follows the #ifdef.
     translation_unit_.add_input_token(MacroNameTok.getLocation(), PPToken::macro_invocation_name);
   }
 
@@ -636,7 +646,11 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
   /// \param MD The MacroDefinition if the name was a macro, null otherwise.
   void Elifdef(SourceLocation DirectiveLocation, Token const& MacroNameTok, MacroDefinition const& MD) override
   {
-    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Elifdef", MacroNameTok, MD));
+    if (!add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Elifdef", MacroNameTok, MD)))
+      return;
+
+    // Add the macro name that follows the #elifdef.
+    translation_unit_.add_input_token(MacroNameTok.getLocation(), PPToken::macro_invocation_name);
   }
 
   /// Hook called whenever an \#elifdef is skipped.
@@ -645,7 +659,10 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
   /// \param IfLoc the source location of the \#if/\#ifdef/\#ifndef directive.
   void Elifdef(SourceLocation DirectiveLocation, SourceRange ConditionRange, SourceLocation IfLoc) override
   {
-    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Elifdef", ConditionRange, IfLoc));
+    if (!add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Elifdef", ConditionRange, IfLoc)))
+      return;
+
+    translation_unit_.lex_source_range(ConditionRange);
   }
 
   /// Hook called whenever an \#ifndef is seen.
@@ -654,7 +671,11 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
   /// \param MD The MacroDefiniton if the name was a macro, null otherwise.
   void Ifndef(SourceLocation DirectiveLocation, Token const& MacroNameTok, MacroDefinition const& MD) override
   {
-    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Ifndef", MacroNameTok, MD));
+    if (!add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Ifndef", MacroNameTok, MD)))
+      return;
+
+    // Add the macro name that follows the #ifndef.
+    translation_unit_.add_input_token(MacroNameTok.getLocation(), PPToken::macro_invocation_name);
   }
 
   /// Hook called whenever an \#elifndef branch is taken.
@@ -663,7 +684,11 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
   /// \param MD The MacroDefinition if the name was a macro, null otherwise.
   void Elifndef(SourceLocation DirectiveLocation, Token const& MacroNameTok, MacroDefinition const& MD) override
   {
-    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Elifndef", MacroNameTok, MD));
+    if (!add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Elifndef", MacroNameTok, MD)))
+      return;
+
+    // Add the macro name that follows the #elifndef.
+    translation_unit_.add_input_token(MacroNameTok.getLocation(), PPToken::macro_invocation_name);
   }
 
   /// Hook called whenever an \#elifndef is skipped.
@@ -672,7 +697,10 @@ class PreprocessorEventsHandler : public clang::PPCallbacks, public TranslationU
   /// \param IfLoc the source location of the \#if/\#ifdef/\#ifndef directive.
   void Elifndef(SourceLocation DirectiveLocation, SourceRange ConditionRange, SourceLocation IfLoc) override
   {
-    add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Elifndef", ConditionRange, IfLoc));
+    if (!add_directive(DirectiveLocation COMMA_CWDEBUG_ONLY("Elifndef", ConditionRange, IfLoc)))
+      return;
+
+    translation_unit_.lex_source_range(ConditionRange);
   }
 
   /// Hook called whenever an \#else is seen.
